@@ -58,7 +58,7 @@
   }
   #player.open{display:flex;}
   .player-card{
-    width:100%;max-width:520px;background:var(--blue-bg);border:1px solid var(--line);
+    width:100%;max-width:860px;background:var(--blue-bg);border:1px solid var(--line);
     border-radius:14px;overflow:hidden;position:relative;
   }
   .player-media{width:100%;aspect-ratio:16/9;background:#08161f;position:relative;}
