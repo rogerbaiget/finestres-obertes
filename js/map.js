@@ -77,22 +77,29 @@ function addContourLayers(){
   const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
   const geo = contourToGeoJSON(pickContour(map.getZoom()));
 
-  // Insert below the first text/label layer, so place names always render crisp
-  // on top of the mask instead of being dimmed by it.
-  const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol');
-  const beforeId = firstSymbol ? firstSymbol.id : undefined;
-
-  // The mask fill specifically goes just before 'water-sea' instead (carto-style.js
-  // splits CARTO's single 'water' layer into 'water-inland' — lake/pond/river, left in
-  // place so the mask still dims it outside the region — and 'water-sea', which sits
-  // right after it). Landing the mask between the two means land fills (landcover/
-  // landuse/roads) and inland water all still get dimmed, but 'water-sea' then paints
-  // on top of the mask and hides it wherever there's actually open sea. Without this,
-  // the mask (a solid, semi-opaque "outside" color) sits above the water fill too,
-  // showing up as a visible haze over every sea pixel — barely noticeable when water
-  // was a similarly pale tone, but obvious once it's a distinct blue.
-  const seaLayer = map.getStyle().layers.find(l => l.id === 'water-sea');
-  const maskBeforeId = seaLayer ? seaLayer.id : beforeId;
+  // CARTO's actual *first* symbol layer overall is 'waterway_label' (river-name
+  // labels), which sits far earlier than roads/buildings/boundaries — style layers
+  // aren't cleanly split into "fills/lines first, then all labels"; labels are
+  // interleaved throughout for cartographic z-ordering. So "before the first symbol
+  // layer" is NOT a safe insertion point for anything meant to sit after all the
+  // land-detail layers; it landed contour-outline-layer and comarques-outline-layer
+  // far too early, letting the mask (correctly positioned late, see below) paint
+  // right over them.
+  //
+  // carto-style.js instead deliberately positions 'water-sea' at the very end of the
+  // non-label layers — after every road/rail/bridge/building/boundary line CARTO
+  // draws, and right before the first *late* label layer ('watername_ocean'). Using
+  // 'water-sea' as the shared reference point puts everything in the right place:
+  // the mask goes immediately before it (ending up after all land-detail layers, so
+  // they're dimmed outside the region), while the outline and comarques layers go
+  // immediately after it (staying crisp, on top of both the mask and the sea, same as
+  // before).
+  const layers = map.getStyle().layers;
+  const seaLayerIdx = layers.findIndex(l => l.id === 'water-sea');
+  const seaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx] : null;
+  const afterSeaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx + 1] : null;
+  const maskBeforeId = seaLayer ? seaLayer.id : undefined;
+  const beforeId = afterSeaLayer ? afterSeaLayer.id : maskBeforeId;
 
   map.addSource(maskSourceId, {type:'geojson', data: geo.mask});
   map.addLayer({id:'contour-mask-layer', type:'fill', source:maskSourceId, paint:{'fill-color':maskColor, 'fill-opacity':maskOpacity}}, maskBeforeId);

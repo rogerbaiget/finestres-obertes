@@ -98,6 +98,16 @@ function splitSeaFromInlandWater(style){
   const inlandLayer = { ...original, id: 'water-inland', filter: ['all', baseFilter, ['!', isSea], ['!', isExcluded]] };
   const seaLayer = { ...original, id: 'water-sea', filter: ['all', baseFilter, isSea] };
   style.layers.splice(idx, 1, inlandLayer, seaLayer);
+
+  // 'water-sea' also needs to sit at the very end of the non-label layers (just
+  // before the first symbol layer), not where the original 'water' layer was. CARTO's
+  // roads, railways, bridges, buildings, and country-border lines all render *after*
+  // that original position — if 'water-sea' (and the mask, inserted just before it in
+  // map.js) stayed there too, every one of those layers would render on top of the
+  // mask outside the region, undimmed. Moving 'water-sea' to the end means the mask
+  // ends up after all of them (dimming them, as intended) and still just before
+  // 'water-sea' (keeping the sea itself undimmed).
+  moveLayerBefore(style, 'water-sea', 'watername_ocean');
 }
 
 // Only rivers should show as waterway lines — CARTO's 'waterway' layer otherwise

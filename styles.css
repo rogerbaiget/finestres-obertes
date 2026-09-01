@@ -2,7 +2,7 @@
     --blue-bg:#0e2a3d; --blue-dark:#0a1f2e; --sand:#f1e4c8;
     --red:#c8102e; --yellow:#f2b705; --white:#fbf7ee;
     --line:rgba(241,228,200,0.16); --text-secondary:rgba(241,228,200,0.7);
-    --mask:#050d14; --mask-opacity:0.9;
+    --mask:#2e333a; --mask-opacity:0.9;
   }
   html.light{
     --blue-bg:#f2ecdb; --blue-dark:#faf6ea; --sand:#2a2016;
