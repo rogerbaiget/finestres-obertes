@@ -175,14 +175,29 @@ async function initMap(){
   const initialTheme = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   const style = await loadCartoStyle(initialTheme === 'light' ? 'light' : 'dark');
 
+  // No maxBounds here: fitBounds() below would be clamped by whatever maxBounds is
+  // already active *during* the fit call, which under-zooms and clips part of the
+  // region — confirmed directly (with a small constructor-time maxBounds, fitting the
+  // same contour bounds landed at zoom 7.3 and cut off everything outside roughly
+  // 39.2-41.6°N; with no maxBounds active it correctly reached zoom 6.1, covering the
+  // whole 37.6-43.1°N range). Panning is unrestricted for the brief moment before
+  // 'load' fires below, which is harmless — there's no realistic way to interact with
+  // the map in that window.
   map = new maplibregl.Map({
     container:'map', style, center:[1.3,41.5], zoom:6.6, minZoom:5,
-    maxBounds:[[-9,33],[9,48]], attributionControl:false
+    attributionControl:false
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
   map.on('load', ()=>{
     fitToContour();
+    // Lock panning to whatever the fit above actually shows, rather than a guessed
+    // fixed-degree margin: on a wide viewport, fitting the contour's height can need
+    // several extra degrees of longitude to fill the width, so a small fixed margin
+    // ends up tighter than the fit itself and clips part of the region on first load.
+    // Deriving maxBounds from the real post-fit viewport can't be too tight this way,
+    // for any window size/aspect ratio.
+    map.setMaxBounds(map.getBounds());
     addContourLayers();
     addAllMarkers();
     checkAllLayersAvailability();
