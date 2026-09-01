@@ -1,4 +1,5 @@
 import { COMARQUES_DATA } from './data/comarques.js';
+import { ANDORRA_CATALONIA_BORDER } from './data/andorra-catalonia-border.js';
 import {
   CONTOUR_LOCAL_VERY_LOW, CONTOUR_LOCAL_LOW, CONTOUR_LOCAL, CONTOUR_LOCAL_DETAIL,
   CONTOUR_LOCAL_VERY_FINE, CONTOUR_LOCAL_FINEST, CONTOUR_LOCAL_MAX
@@ -107,6 +108,26 @@ function addContourLayers(){
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 
   addComarquesLayer(beforeId);
+  addAndorraCataloniaBorderLayer(beforeId);
+}
+
+// Andorra/Catalonia is the one country border kept on the map (see js/carto-style.js
+// for why every other one is dropped): both sides sit inside the Catalan Countries
+// contour, so it's styled like an internal boundary — same look as comarques — rather
+// than the international border line CARTO would otherwise draw.
+function andorraCataloniaBorderToGeoJSON(){
+  return {type:'Feature', geometry:{type:'LineString', coordinates: ANDORRA_CATALONIA_BORDER.map(([lat,lng])=>[lng,lat])}};
+}
+
+function addAndorraCataloniaBorderLayer(beforeId){
+  if(map.getLayer('andorra-catalonia-border-layer')) map.removeLayer('andorra-catalonia-border-layer');
+  if(map.getSource('andorra-catalonia-border')) map.removeSource('andorra-catalonia-border');
+  map.addSource('andorra-catalonia-border', {type:'geojson', data: andorraCataloniaBorderToGeoJSON()});
+  const style0 = getComputedStyle(document.documentElement);
+  map.addLayer({
+    id:'andorra-catalonia-border-layer', type:'line', source:'andorra-catalonia-border',
+    paint:{'line-color': style0.getPropertyValue('--sand').trim() || '#f1e4c8', 'line-width':0.8, 'line-opacity':0.45}
+  }, beforeId);
 }
 
 const COMARQUES_MIN_ZOOM = 8;
@@ -145,6 +166,9 @@ function refreshContourColors(){
   map.setPaintProperty('contour-mask-layer', 'fill-opacity', parseFloat(style0.getPropertyValue('--mask-opacity')));
   if(map.getLayer('comarques-outline-layer')){
     map.setPaintProperty('comarques-outline-layer', 'line-color', style0.getPropertyValue('--sand').trim());
+  }
+  if(map.getLayer('andorra-catalonia-border-layer')){
+    map.setPaintProperty('andorra-catalonia-border-layer', 'line-color', style0.getPropertyValue('--sand').trim());
   }
 }
 

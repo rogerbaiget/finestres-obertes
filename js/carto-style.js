@@ -136,6 +136,21 @@ function increaseWaterContrast(style, mode){
   });
 }
 
+// International borders (admin_level 2) aren't wanted on a map centered on a
+// linguistic/cultural region that itself straddles the Spain/France/Italy border —
+// drawing them would visually contradict the whole point of the contour outline.
+// Region (admin_level 4) and county/comarca (admin_level 6) boundaries are untouched.
+// (The Andorra/Catalonia border is drawn separately, as its own static line layer in
+// map.js, restyled to look internal — see addAndorraCataloniaBorderLayer there. It
+// can't be recovered from these layers via a style filter: MapLibre's 'within' only
+// matches a feature whose ENTIRE geometry sits inside the given polygon, and CARTO's
+// per-tile boundary lines run the whole way around Andorra — both the Catalonia and
+// France sides at once — so no such filter ever matched anything.)
+const COUNTRY_BORDER_LAYER_IDS = ['boundary_country_outline', 'boundary_country_inner'];
+function removeCountryBorders(style){
+  style.layers = style.layers.filter(l => !COUNTRY_BORDER_LAYER_IDS.includes(l.id));
+}
+
 export async function loadCartoStyle(mode){
   const url = mode === 'light'
     ? 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -143,6 +158,7 @@ export async function loadCartoStyle(mode){
   const res = await fetch(url);
   const style = await res.json();
   moveLayerBefore(style, 'place_state', 'place_hamlet');
+  removeCountryBorders(style);
   splitSeaFromInlandWater(style);
   showOnlyRivers(style);
   increaseWaterContrast(style, mode);
