@@ -82,8 +82,20 @@ function addContourLayers(){
   const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol');
   const beforeId = firstSymbol ? firstSymbol.id : undefined;
 
+  // The mask fill specifically goes just before 'water-sea' instead (carto-style.js
+  // splits CARTO's single 'water' layer into 'water-inland' — lake/pond/river, left in
+  // place so the mask still dims it outside the region — and 'water-sea', which sits
+  // right after it). Landing the mask between the two means land fills (landcover/
+  // landuse/roads) and inland water all still get dimmed, but 'water-sea' then paints
+  // on top of the mask and hides it wherever there's actually open sea. Without this,
+  // the mask (a solid, semi-opaque "outside" color) sits above the water fill too,
+  // showing up as a visible haze over every sea pixel — barely noticeable when water
+  // was a similarly pale tone, but obvious once it's a distinct blue.
+  const seaLayer = map.getStyle().layers.find(l => l.id === 'water-sea');
+  const maskBeforeId = seaLayer ? seaLayer.id : beforeId;
+
   map.addSource(maskSourceId, {type:'geojson', data: geo.mask});
-  map.addLayer({id:'contour-mask-layer', type:'fill', source:maskSourceId, paint:{'fill-color':maskColor, 'fill-opacity':maskOpacity}}, beforeId);
+  map.addLayer({id:'contour-mask-layer', type:'fill', source:maskSourceId, paint:{'fill-color':maskColor, 'fill-opacity':maskOpacity}}, maskBeforeId);
   map.addSource(outlineSourceId, {type:'geojson', data: geo.outline});
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 

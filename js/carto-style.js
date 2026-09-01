@@ -80,6 +80,52 @@ function moveLayerBefore(style, layerId, beforeLayerId){
   style.layers.splice(style.layers.findIndex(l => l.id === beforeLayerId), 0, layer);
 }
 
+// CARTO's single 'water' layer covers ocean, sea, lake, pond, and river polygons alike
+// with no class-based distinction. Splitting it lets the mask (inserted later, in
+// map.js) sit between the two: inland water (lake/river) stays dimmed outside the
+// region like any other foreign feature, while ocean/sea — placed back on top of the
+// mask — doesn't get a visible haze painted over open water. Ponds are dropped
+// entirely: only rivers and lakes are meant to show.
+function splitSeaFromInlandWater(style){
+  const idx = style.layers.findIndex(l => l.id === 'water');
+  if(idx === -1) return;
+  const original = style.layers[idx];
+  const baseFilter = toExpressionFilter(original.filter);
+  const isSea = ['in', ['get','class'], ['literal', ['ocean','sea']]];
+  // Pools/fountains (OpenMapTiles buckets ornamental fountains under 'swimming_pool')
+  // aren't rivers or lakes either.
+  const isExcluded = ['in', ['get','class'], ['literal', ['pond','swimming_pool']]];
+  const inlandLayer = { ...original, id: 'water-inland', filter: ['all', baseFilter, ['!', isSea], ['!', isExcluded]] };
+  const seaLayer = { ...original, id: 'water-sea', filter: ['all', baseFilter, isSea] };
+  style.layers.splice(idx, 1, inlandLayer, seaLayer);
+}
+
+// Only rivers should show as waterway lines — CARTO's 'waterway' layer otherwise
+// includes every OpenMapTiles waterway class (stream, canal, drain, ditch), i.e.
+// creeks and similar minor watercourses.
+function showOnlyRivers(style){
+  const waterway = style.layers.find(l => l.id === 'waterway');
+  if(waterway) waterway.filter = ['==', ['get','class'], 'river'];
+}
+
+// CARTO's default water color sits too close in luminance to the land/background
+// color to read clearly at a glance (contrast ratio ~1.35-1.55, both near the
+// respective background tone) — a more distinctly blue tone separates sea from land
+// without departing far from each theme's palette.
+function increaseWaterContrast(style, mode){
+  const waterColor = mode === 'light' ? '#7bafd4' : '#446073';
+  style.layers.forEach(layer=>{
+    if(layer.id === 'water-inland' || layer.id === 'water-sea') layer.paint['fill-color'] = waterColor;
+    if(layer.id === 'waterway') layer.paint['line-color'] = waterColor;
+    // The ocean/sea label halo is meant to blend into the water fill behind it —
+    // only relevant in light mode, where it explicitly matched the old water color;
+    // dark mode's halo is a translucent black, unrelated to the water hex.
+    if(mode === 'light' && (layer.id === 'watername_ocean' || layer.id === 'watername_sea')){
+      layer.paint['text-halo-color'] = waterColor;
+    }
+  });
+}
+
 export async function loadCartoStyle(mode){
   const url = mode === 'light'
     ? 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -87,6 +133,9 @@ export async function loadCartoStyle(mode){
   const res = await fetch(url);
   const style = await res.json();
   moveLayerBefore(style, 'place_state', 'place_hamlet');
+  splitSeaFromInlandWater(style);
+  showOnlyRivers(style);
+  increaseWaterContrast(style, mode);
   // Force every label to use the Catalan name field, falling back to the default name.
   // A few names are then overridden: OSM's official "Comunitat Valenciana" is replaced
   // with the more commonly used "País Valencià".
