@@ -167,21 +167,21 @@ function checkAllLayersAvailability(){
 
 function applySiteConfig(){
   document.title = SITE_CONFIG.title;
-  document.getElementById('site-eyebrow').textContent = SITE_CONFIG.eyebrow;
   document.getElementById('site-heading').textContent = SITE_CONFIG.heading;
-  document.getElementById('site-description').textContent = SITE_CONFIG.description;
 }
 
 function renderLegend(){
   const legendEl = document.getElementById('legend');
-  const toggleBtn = document.getElementById('theme-toggle');
   LAYERS.forEach(layer=>{
-    (layer.legend || []).forEach(({color, label})=>{
+    (layer.legend || []).forEach(({color, label, size, boxShadow, opacity})=>{
       const item = document.createElement('span');
       const swatch = document.createElement('i');
       swatch.style.background = color;
+      if(size){ swatch.style.width = size + 'px'; swatch.style.height = size + 'px'; }
+      if(boxShadow) swatch.style.boxShadow = boxShadow;
+      if(opacity != null && opacity < 1) swatch.style.opacity = opacity;
       item.append(swatch, ' ' + label);
-      legendEl.insertBefore(item, toggleBtn);
+      legendEl.appendChild(item);
     });
   });
 }

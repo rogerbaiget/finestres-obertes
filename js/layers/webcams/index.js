@@ -1,5 +1,5 @@
 import { WEBCAMS } from './data.js';
-import { createWebcamMarkerElement } from './marker.js';
+import { createWebcamMarkerElement, getWebcamAppearance } from './marker.js';
 import { openWebcamPlayer } from './player.js';
 import { checkAvailability } from './status.js';
 
@@ -9,6 +9,11 @@ import { checkAvailability } from './status.js';
 // live availability. map.js knows nothing about webcams specifically — it only knows
 // this shape, so a future layer (e.g. weather stations, points of interest) is added
 // the same way, in its own js/layers/<name>/ folder.
+//
+// The legend entries below render getWebcamAppearance() for a representative item of
+// each media type, rather than restating color/size/glow as separate hardcoded data —
+// so the legend can't drift from what markers actually look like as that styling
+// evolves.
 export const webcamsLayer = {
   id: 'webcams',
   items: WEBCAMS,
@@ -16,7 +21,7 @@ export const webcamsLayer = {
   onSelect: openWebcamPlayer,
   checkAvailability,
   legend: [
-    { color: 'var(--red)', label: 'Vídeo en directe' },
-    { color: 'var(--yellow)', label: 'Última captura' }
+    { ...getWebcamAppearance({ media: 'video' }), label: 'Vídeo en directe' },
+    { ...getWebcamAppearance({ media: 'photo' }), label: 'Última captura' }
   ]
 };
