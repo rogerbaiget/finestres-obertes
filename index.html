@@ -13,6 +13,15 @@
 <title>Mapa</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- crossorigin is required here (unlike the fonts.googleapis.com preconnect above):
+     loadCartoStyle() fetches style.json via fetch(), which uses CORS mode, opening a
+     different kind of connection than a plain preconnect — without this attribute
+     the browser opens a second connection anyway and the preconnect goes unused. -->
+<link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin>
+<!-- Both also fetched cross-origin (MapLibre's own tile/font/sprite loading, and
+     load.js's fetch() to the Worker), so both need crossorigin for the same reason. -->
+<link rel="preconnect" href="https://tiles.basemaps.cartocdn.com" crossorigin>
+<link rel="preconnect" href="https://finestres-obertes-cameras-api.roger-baiget.workers.dev" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Space+Grotesk:wght@400;500;700&display=block" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Space+Grotesk:wght@400;500;700&display=block" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="styles.css">
