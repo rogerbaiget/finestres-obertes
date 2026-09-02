@@ -34,10 +34,6 @@ function computeContourBounds(){
   return [[minLng,minLat],[maxLng,maxLat]];
 }
 
-function fitToContour(){
-  map.fitBounds(computeContourBounds(), {padding:24, duration:0});
-}
-
 // Every level but VERY_LOW is fetched on demand (see data/contours.js) and cached
 // there — only the level the current zoom actually needs gets downloaded, instead of
 // all 7 (up to 320KB each) on every page load regardless of whether the user ever
@@ -304,16 +300,21 @@ async function initMap(){
   const initialTheme = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   const style = await loadCartoStyle(initialTheme === 'light' ? 'light' : 'dark');
 
-  // No maxBounds here: fitBounds() below would be clamped by whatever maxBounds is
-  // already active *during* the fit call, which under-zooms and clips part of the
-  // region — confirmed directly (with a small constructor-time maxBounds, fitting the
-  // same contour bounds landed at zoom 7.3 and cut off everything outside roughly
+  // Passed as the constructor's own bounds/fitBoundsOptions, rather than a guessed
+  // center/zoom followed by a corrective fitBounds() once 'load' fires: that
+  // sequence painted the guessed view first, then visibly snapped to the real one —
+  // this way the very first frame the map ever paints is already the fitted view.
+  //
+  // No maxBounds here: the fit would be clamped by whatever maxBounds is already
+  // active *during* the fit, which under-zooms and clips part of the region —
+  // confirmed directly (with a small constructor-time maxBounds, fitting the same
+  // contour bounds landed at zoom 7.3 and cut off everything outside roughly
   // 39.2-41.6°N; with no maxBounds active it correctly reached zoom 6.1, covering the
   // whole 37.6-43.1°N range). Panning is unrestricted for the brief moment before
   // 'load' fires below, which is harmless — there's no realistic way to interact with
   // the map in that window.
   map = new maplibregl.Map({
-    container:'map', style, center:[1.3,41.5], zoom:6.6, minZoom:5,
+    container:'map', style, bounds: computeContourBounds(), fitBoundsOptions:{padding:24}, minZoom:5,
     attributionControl:false
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -325,8 +326,7 @@ async function initMap(){
   const layersLoaded = loadAllLayers();
 
   map.on('load', async ()=>{
-    fitToContour();
-    // Lock panning to whatever the fit above actually shows, rather than a guessed
+    // Lock panning to whatever the constructor's fit above actually shows, rather than a guessed
     // fixed-degree margin: on a wide viewport, fitting the contour's height can need
     // several extra degrees of longitude to fill the width, so a small fixed margin
     // ends up tighter than the fit itself and clips part of the region on first load.
