@@ -15,6 +15,12 @@
   #app{display:grid;grid-template-rows:auto 1fr;height:100dvh;}
 
   header{padding:16px 22px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--blue-bg),var(--blue-dark));display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px;}
+  /* Below ~1024px the title/legend/toggle row wraps to two lines once JS populates
+     them (empty at first paint, so nothing wraps yet) — reserving that wrapped
+     height up front (measured: 115px worst case, down to 320px wide) stops the row
+     from growing after content and the web font swap land, which was the single
+     largest contributor to this page's CLS score. */
+  @media (max-width:1024px){ header{min-height:120px;} }
   .titlewrap{max-width:640px;}
   h1{font-family:'Fraunces',serif;font-weight:700;font-size:clamp(18px,3.5vw,25px);margin:0;color:var(--white);letter-spacing:-0.01em;}
   .header-right{display:flex;align-items:center;gap:20px;flex-wrap:wrap;flex-shrink:0;}
