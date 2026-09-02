@@ -1,8 +1,7 @@
-import { COMARQUES_DATA } from './data/comarques.js';
+import { loadComarques } from './data/comarques.js';
 import { ANDORRA_CATALONIA_BORDER } from './data/andorra-catalonia-border.js';
 import {
-  CONTOUR_LOCAL_VERY_LOW, CONTOUR_LOCAL_LOW, CONTOUR_LOCAL, CONTOUR_LOCAL_DETAIL,
-  CONTOUR_LOCAL_VERY_FINE, CONTOUR_LOCAL_FINEST, CONTOUR_LOCAL_MAX
+  CONTOUR_LOCAL_VERY_LOW, loadLow, loadLocal, loadDetail, loadVeryFine, loadFinest, loadMax
 } from './data/contours.js';
 import { loadCartoStyle } from './carto-style.js';
 import { applyTheme } from './theme.js';
@@ -39,19 +38,54 @@ function fitToContour(){
   map.fitBounds(computeContourBounds(), {padding:24, duration:0});
 }
 
+// Every level but VERY_LOW is fetched on demand (see data/contours.js) and cached
+// there — only the level the current zoom actually needs gets downloaded, instead of
+// all 7 (up to 320KB each) on every page load regardless of whether the user ever
+// zooms in that far.
 function pickContour(zoom){
-  if(zoom < 6) return CONTOUR_LOCAL_VERY_LOW;
-  if(zoom < 7) return CONTOUR_LOCAL_LOW;
-  if(zoom < 8) return CONTOUR_LOCAL;
-  if(zoom < 9) return CONTOUR_LOCAL_DETAIL;
-  if(zoom < 10) return CONTOUR_LOCAL_VERY_FINE;
-  if(zoom < 11) return CONTOUR_LOCAL_FINEST;
-  return CONTOUR_LOCAL_MAX;
+  if(zoom < 6) return Promise.resolve(CONTOUR_LOCAL_VERY_LOW);
+  if(zoom < 7) return loadLow();
+  if(zoom < 8) return loadLocal();
+  if(zoom < 9) return loadDetail();
+  if(zoom < 10) return loadVeryFine();
+  if(zoom < 11) return loadFinest();
+  return loadMax();
 }
 
-function updateContour(){
+// Shared by addContourLayers() and preserveContourLayersAcrossStyleSwap(): CARTO's
+// actual *first* symbol layer overall is 'waterway_label' (river-name labels), which
+// sits far earlier than roads/buildings/boundaries — style layers aren't cleanly split
+// into "fills/lines first, then all labels"; labels are interleaved throughout for
+// cartographic z-ordering. So "before the first symbol layer" is NOT a safe insertion
+// point for anything meant to sit after all the land-detail layers.
+//
+// carto-style.js instead deliberately positions 'water-sea' at the very end of the
+// non-label layers — after every road/rail/bridge/building/boundary line CARTO draws,
+// and right before the first *late* label layer ('watername_ocean'). Using 'water-sea'
+// as the shared reference point puts everything in the right place: the mask goes
+// immediately before it (ending up after all land-detail layers, so they're dimmed
+// outside the region), while the outline/comarques/Andorra-border layers go
+// immediately after it (staying crisp, on top of both the mask and the sea).
+function computeInsertionPoints(layers){
+  const seaLayerIdx = layers.findIndex(l => l.id === 'water-sea');
+  const seaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx] : null;
+  const afterSeaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx + 1] : null;
+  const maskBeforeId = seaLayer ? seaLayer.id : undefined;
+  const beforeId = afterSeaLayer ? afterSeaLayer.id : maskBeforeId;
+  return { maskBeforeId, beforeId };
+}
+
+// A zoom change can fire updateContour() again before an earlier call's fetch (for a
+// level not loaded yet) resolves — this guards against the earlier one's stale data
+// landing after the newer one's, which would otherwise leave the wrong detail level
+// showing until the next zoomend.
+let contourGeneration = 0;
+
+async function updateContour(){
   const zoom = map.getZoom();
-  const rings = pickContour(zoom);
+  const gen = ++contourGeneration;
+  const rings = await pickContour(zoom);
+  if(gen !== contourGeneration) return;
   const geo = contourToGeoJSON(rings);
   if(map.getSource(maskSourceId)){
     map.getSource(maskSourceId).setData(geo.mask);
@@ -59,7 +93,7 @@ function updateContour(){
   }
 }
 
-function addContourLayers(){
+async function addContourLayers(){
   // Remove any leftovers from a previous style (defensive, avoids "already exists" errors)
   [ 'contour-outline-layer','contour-mask-layer' ].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
   [ maskSourceId, outlineSourceId ].forEach(id=>{ if(map.getSource(id)) map.removeSource(id); });
@@ -67,38 +101,16 @@ function addContourLayers(){
   const style0 = getComputedStyle(document.documentElement);
   const maskColor = style0.getPropertyValue('--mask').trim() || '#050d14';
   const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
-  const geo = contourToGeoJSON(pickContour(map.getZoom()));
+  const geo = contourToGeoJSON(await pickContour(map.getZoom()));
 
-  // CARTO's actual *first* symbol layer overall is 'waterway_label' (river-name
-  // labels), which sits far earlier than roads/buildings/boundaries — style layers
-  // aren't cleanly split into "fills/lines first, then all labels"; labels are
-  // interleaved throughout for cartographic z-ordering. So "before the first symbol
-  // layer" is NOT a safe insertion point for anything meant to sit after all the
-  // land-detail layers; it landed contour-outline-layer and comarques-outline-layer
-  // far too early, letting the mask (correctly positioned late, see below) paint
-  // right over them.
-  //
-  // carto-style.js instead deliberately positions 'water-sea' at the very end of the
-  // non-label layers — after every road/rail/bridge/building/boundary line CARTO
-  // draws, and right before the first *late* label layer ('watername_ocean'). Using
-  // 'water-sea' as the shared reference point puts everything in the right place:
-  // the mask goes immediately before it (ending up after all land-detail layers, so
-  // they're dimmed outside the region), while the outline and comarques layers go
-  // immediately after it (staying crisp, on top of both the mask and the sea, same as
-  // before).
-  const layers = map.getStyle().layers;
-  const seaLayerIdx = layers.findIndex(l => l.id === 'water-sea');
-  const seaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx] : null;
-  const afterSeaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx + 1] : null;
-  const maskBeforeId = seaLayer ? seaLayer.id : undefined;
-  const beforeId = afterSeaLayer ? afterSeaLayer.id : maskBeforeId;
+  const { maskBeforeId, beforeId } = computeInsertionPoints(map.getStyle().layers);
 
   map.addSource(maskSourceId, {type:'geojson', data: geo.mask});
   map.addLayer({id:'contour-mask-layer', type:'fill', source:maskSourceId, paint:{'fill-color':maskColor, 'fill-opacity':maskOpacity}}, maskBeforeId);
   map.addSource(outlineSourceId, {type:'geojson', data: geo.outline});
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 
-  addComarquesLayer(beforeId);
+  updateComarquesVisibility();
   addAndorraCataloniaBorderLayer(beforeId);
 }
 
@@ -121,51 +133,44 @@ function addAndorraCataloniaBorderLayer(beforeId){
   }, beforeId);
 }
 
-// The 4 layers/sources above all get torn down and rebuilt by addContourLayers() —
-// fine on initial load, but on a theme toggle that meant a visible flicker: setStyle()'s
+// The layers/sources above all get torn down and rebuilt by addContourLayers() — fine
+// on initial load, but on a theme toggle that meant a visible flicker: setStyle()'s
 // diff (see the click handler below) already drops them, since none of them are part of
 // either CARTO style JSON, and re-adding a GeoJSON source kicks off async tessellation,
 // so there's a frame or two where the mask/outline/comarques/Andorra-border are all gone.
 //
 // To avoid that, the toggle handler calls this first: it lifts the *current* (live)
-// definitions of these 4 layers/sources — unchanged except for the paint colors that
+// definitions of these layers/sources — unchanged except for the paint colors that
 // actually differ between themes — and splices them into the new style object before
 // handing it to setStyle(). Diffing then sees each of them present, in the same
 // position, in both the old and new serialized style, so it emits only the
 // setPaintProperty calls for the color change — no remove/add, no re-tessellation, no
-// flicker. Returns false (nothing spliced in) if the layers aren't there yet — e.g. a
-// toggle click racing the very first 'load' — so the caller can fall back to
-// addContourLayers().
-const CONTOUR_LAYER_IDS = ['contour-mask-layer','contour-outline-layer','comarques-outline-layer','andorra-catalonia-border-layer'];
-const CONTOUR_SOURCE_IDS = [maskSourceId, outlineSourceId, 'comarques', 'andorra-catalonia-border'];
+// flicker. Returns false (nothing spliced in) if the *required* layers aren't there
+// yet — e.g. a toggle click racing the very first 'load' — so the caller can fall back
+// to addContourLayers().
+const REQUIRED_LAYER_IDS = ['contour-mask-layer','contour-outline-layer','andorra-catalonia-border-layer'];
+const REQUIRED_SOURCE_IDS = [maskSourceId, outlineSourceId, 'andorra-catalonia-border'];
+const COMARQUES_LAYER_ID = 'comarques-outline-layer'; // optional — only exists once the user has zoomed past COMARQUES_MIN_ZOOM at least once
 
 function preserveContourLayersAcrossStyleSwap(newStyle){
   const current = map.getStyle();
-  const liveLayers = CONTOUR_LAYER_IDS.map(id => current.layers.find(l => l.id === id));
-  if(liveLayers.some(l => !l)) return false;
+  const requiredLayers = REQUIRED_LAYER_IDS.map(id => current.layers.find(l => l.id === id));
+  if(requiredLayers.some(l => !l)) return false;
 
   const style0 = getComputedStyle(document.documentElement);
   const maskColor = style0.getPropertyValue('--mask').trim() || '#050d14';
   const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
   const sandColor = style0.getPropertyValue('--sand').trim() || '#f1e4c8';
 
-  const [maskLayer, outlineLayer, comarquesLayer, andorraLayer] = liveLayers.map(l => ({...l, paint: {...l.paint}}));
+  const [maskLayer, outlineLayer, andorraLayer] = requiredLayers.map(l => ({...l, paint: {...l.paint}}));
   maskLayer.paint['fill-color'] = maskColor;
   maskLayer.paint['fill-opacity'] = maskOpacity;
-  comarquesLayer.paint['line-color'] = sandColor;
   andorraLayer.paint['line-color'] = sandColor;
 
   newStyle.sources = {...newStyle.sources};
-  CONTOUR_SOURCE_IDS.forEach(id => { if(current.sources[id]) newStyle.sources[id] = current.sources[id]; });
+  REQUIRED_SOURCE_IDS.forEach(id => { if(current.sources[id]) newStyle.sources[id] = current.sources[id]; });
 
-  // Same "insert relative to water-sea" positioning as addContourLayers(), computed
-  // against the new style's own layer order rather than the (about to be replaced)
-  // live one.
-  const seaLayerIdx = newStyle.layers.findIndex(l => l.id === 'water-sea');
-  const seaLayer = seaLayerIdx >= 0 ? newStyle.layers[seaLayerIdx] : null;
-  const afterSeaLayer = seaLayerIdx >= 0 ? newStyle.layers[seaLayerIdx + 1] : null;
-  const maskBeforeId = seaLayer ? seaLayer.id : undefined;
-  const beforeId = afterSeaLayer ? afterSeaLayer.id : maskBeforeId;
+  const { maskBeforeId, beforeId } = computeInsertionPoints(newStyle.layers);
 
   newStyle.layers = [...newStyle.layers];
   function insertBefore(layer, targetId){
@@ -175,16 +180,23 @@ function preserveContourLayersAcrossStyleSwap(newStyle){
   }
   insertBefore(maskLayer, maskBeforeId);
   insertBefore(outlineLayer, beforeId);
-  insertBefore(comarquesLayer, beforeId);
+
+  const comarquesLive = current.layers.find(l => l.id === COMARQUES_LAYER_ID);
+  if(comarquesLive){
+    const comarquesLayer = {...comarquesLive, paint: {...comarquesLive.paint, 'line-color': sandColor}};
+    newStyle.sources['comarques'] = current.sources['comarques'];
+    insertBefore(comarquesLayer, beforeId);
+  }
+
   insertBefore(andorraLayer, beforeId);
   return true;
 }
 
 const COMARQUES_MIN_ZOOM = 8;
 
-function comarquesToGeoJSON(){
+function comarquesToGeoJSON(data){
   const features = [];
-  COMARQUES_DATA.forEach(c=>{
+  data.forEach(c=>{
     c.r.forEach(ring=>{
       features.push({type:'Feature', properties:{name:c.n}, geometry:{type:'LineString', coordinates: ring.map(([lat,lng])=>[lng,lat])}});
     });
@@ -192,21 +204,42 @@ function comarquesToGeoJSON(){
   return {type:'FeatureCollection', features};
 }
 
-function addComarquesLayer(beforeId){
-  if(map.getLayer('comarques-outline-layer')) map.removeLayer('comarques-outline-layer');
-  if(map.getSource('comarques')) map.removeSource('comarques');
-  map.addSource('comarques', {type:'geojson', data: comarquesToGeoJSON()});
-  const style0 = getComputedStyle(document.documentElement);
-  map.addLayer({
-    id:'comarques-outline-layer', type:'line', source:'comarques',
-    paint:{'line-color': style0.getPropertyValue('--sand').trim() || '#f1e4c8', 'line-width':0.8, 'line-opacity':0.45},
-    layout:{'visibility': map.getZoom() >= COMARQUES_MIN_ZOOM ? 'visible' : 'none'}
-  }, beforeId);
+// Fetches comarques.json (276KB) the first time it's actually needed — i.e. the first
+// time the user zooms to COMARQUES_MIN_ZOOM — rather than on every page load
+// regardless of zoom. Guarded against concurrent calls (e.g. two zoomend events firing
+// before the first fetch resolves) with comarquesLoading.
+let comarquesLoading = false;
+
+async function addComarquesLayer(){
+  if(map.getLayer(COMARQUES_LAYER_ID) || comarquesLoading) return;
+  comarquesLoading = true;
+  try{
+    const data = await loadComarques();
+    if(map.getLayer(COMARQUES_LAYER_ID)) return; // added by another call while this one awaited
+    if(map.getSource('comarques')) map.removeSource('comarques');
+    map.addSource('comarques', {type:'geojson', data: comarquesToGeoJSON(data)});
+    const style0 = getComputedStyle(document.documentElement);
+    const { beforeId } = computeInsertionPoints(map.getStyle().layers);
+    map.addLayer({
+      id:COMARQUES_LAYER_ID, type:'line', source:'comarques',
+      paint:{'line-color': style0.getPropertyValue('--sand').trim() || '#f1e4c8', 'line-width':0.8, 'line-opacity':0.45},
+      layout:{'visibility': map.getZoom() >= COMARQUES_MIN_ZOOM ? 'visible' : 'none'}
+    }, beforeId);
+  } finally {
+    comarquesLoading = false;
+  }
 }
 
 function updateComarquesVisibility(){
-  if(!map.getLayer('comarques-outline-layer')) return;
-  map.setLayoutProperty('comarques-outline-layer', 'visibility', map.getZoom() >= COMARQUES_MIN_ZOOM ? 'visible' : 'none');
+  if(map.getZoom() >= COMARQUES_MIN_ZOOM){
+    if(map.getLayer(COMARQUES_LAYER_ID)){
+      map.setLayoutProperty(COMARQUES_LAYER_ID, 'visibility', 'visible');
+    }else{
+      addComarquesLayer();
+    }
+  }else if(map.getLayer(COMARQUES_LAYER_ID)){
+    map.setLayoutProperty(COMARQUES_LAYER_ID, 'visibility', 'none');
+  }
 }
 
 function refreshContourColors(){
@@ -214,8 +247,8 @@ function refreshContourColors(){
   const style0 = getComputedStyle(document.documentElement);
   map.setPaintProperty('contour-mask-layer', 'fill-color', style0.getPropertyValue('--mask').trim());
   map.setPaintProperty('contour-mask-layer', 'fill-opacity', parseFloat(style0.getPropertyValue('--mask-opacity')));
-  if(map.getLayer('comarques-outline-layer')){
-    map.setPaintProperty('comarques-outline-layer', 'line-color', style0.getPropertyValue('--sand').trim());
+  if(map.getLayer(COMARQUES_LAYER_ID)){
+    map.setPaintProperty(COMARQUES_LAYER_ID, 'line-color', style0.getPropertyValue('--sand').trim());
   }
   if(map.getLayer('andorra-catalonia-border-layer')){
     map.setPaintProperty('andorra-catalonia-border-layer', 'line-color', style0.getPropertyValue('--sand').trim());
@@ -300,11 +333,10 @@ async function initMap(){
     // Deriving maxBounds from the real post-fit viewport can't be too tight this way,
     // for any window size/aspect ratio.
     map.setMaxBounds(map.getBounds());
-    addContourLayers();
-    // The map itself is already interactive at this point — markers pop in once the
-    // (already in-flight) layer data finishes loading, rather than blocking the whole
-    // map on that fetch.
-    await layersLoaded;
+    // The map itself is already interactive at this point — markers and the contour
+    // pop in once their (already in-flight) data finishes loading, rather than
+    // blocking the map on either fetch.
+    await Promise.all([addContourLayers(), layersLoaded]);
     addAllMarkers();
   });
   map.on('zoomend', updateContour);
@@ -331,7 +363,7 @@ async function initMap(){
     if(!preserved){
       // First toggle raced the initial 'load' handler — nothing to preserve yet, so
       // fall back to the same imperative add the initial load uses.
-      addContourLayers();
+      await addContourLayers();
       refreshContourColors();
     }
     themeSwitching = false;
