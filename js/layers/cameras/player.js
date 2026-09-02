@@ -1,8 +1,8 @@
 import { showPlayer } from '../../ui/player.js';
 
-export function openWebcamPlayer(cam){
+export function openCameraPlayer(cam){
   let mediaHtml;
-  if(cam.broken || cam._broken){
+  if(cam.broken){
     mediaHtml = `<div class="player-fallback">Aquesta font no està disponible ara mateix.</div>`;
   }else if(cam.media==='video'){
     mediaHtml = `<iframe src="${cam.src}" allow="autoplay; encrypted-media; fullscreen" allowfullscreen loading="lazy"></iframe>`;
@@ -13,7 +13,7 @@ export function openWebcamPlayer(cam){
     mediaHtml,
     name: cam.n,
     loc: cam.loc,
-    badgeText: cam._broken ? 'Possiblement no disponible' : (cam.media==='video' ? 'Vídeo en directe' : 'Última captura'),
-    badgeClass: cam._broken ? 'broken' : cam.media
+    badgeText: cam.broken ? 'Possiblement no disponible' : (cam.media==='video' ? 'Vídeo en directe' : 'Última captura'),
+    badgeClass: cam.broken ? 'broken' : cam.media
   });
 }

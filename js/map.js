@@ -7,12 +7,12 @@ import {
 import { loadCartoStyle } from './carto-style.js';
 import { applyTheme } from './theme.js';
 import { wirePlayerControls } from './ui/player.js';
-import { webcamsLayer } from './layers/webcams/index.js';
+import { camerasLayer } from './layers/cameras/index.js';
 import { SITE_CONFIG } from './site-config.js';
 
 // Data sources shown on the map. Each entry follows the layer shape documented in
-// js/layers/webcams/index.js — add a new layer by adding its module here.
-const LAYERS = [webcamsLayer];
+// js/layers/cameras/index.js — add a new layer by adding its module here.
+const LAYERS = [camerasLayer];
 
 let map, maskSourceId = 'contour-mask', outlineSourceId = 'contour-outline';
 
@@ -235,8 +235,11 @@ function addAllMarkers(){
   LAYERS.forEach(addLayerMarkers);
 }
 
-function checkAllLayersAvailability(){
-  LAYERS.forEach(layer=>{ if(layer.checkAvailability) layer.checkAvailability(); });
+// A layer whose data doesn't ship with the site (e.g. cameras, fetched from a
+// Worker) implements load(); map.js just awaits whichever layers have one, generic
+// to any future layer, before drawing markers.
+async function loadAllLayers(){
+  await Promise.all(LAYERS.map(layer => layer.load ? layer.load() : null));
 }
 
 function applySiteConfig(){
@@ -282,7 +285,7 @@ async function initMap(){
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
-  map.on('load', ()=>{
+  map.on('load', async ()=>{
     fitToContour();
     // Lock panning to whatever the fit above actually shows, rather than a guessed
     // fixed-degree margin: on a wide viewport, fitting the contour's height can need
@@ -292,8 +295,11 @@ async function initMap(){
     // for any window size/aspect ratio.
     map.setMaxBounds(map.getBounds());
     addContourLayers();
+    // The map itself is already interactive at this point — markers pop in once each
+    // layer's data (e.g. cameras, fetched from a Worker) finishes loading, rather than
+    // blocking the whole map on that fetch.
+    await loadAllLayers();
     addAllMarkers();
-    checkAllLayersAvailability();
   });
   map.on('zoomend', updateContour);
   map.on('zoomend', updateComarquesVisibility);

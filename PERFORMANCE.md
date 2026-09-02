@@ -1,4 +1,4 @@
-# Performance audit — 2026-09-02
+                                                                                                                                                                                                                        # Performance audit — 2026-09-02
 
 Lighthouse 13 (mobile, default throttling: 4x CPU, ~1.6Mbps) against a local
 static server. No production URL was live at audit time, so this is lab data
@@ -16,9 +16,10 @@ only — no CrUX field data exists yet for this project.
 
 ## Critical issues (1 found)
 
-- **[Performance] 70 webcam "availability check" calls download full-resolution
+- **[Performance] 70 camera "availability check" calls download full-resolution
   photos on every page load, for markers that aren't even open yet.**
-  File: `js/layers/webcams/status.js:9-14` (`checkPhoto`)
+  File: `js/layers/webcams/status.js:9-14` (`checkPhoto`) — this file has
+  since been restructured and moved server-side; see "Fix" below.
   - **Impact:** Dominant cause of nearly everything else being bad. Measured:
     9 of the top 10 heaviest requests on the page are these checks —
     `MeteoAlmoster.jpg` (3.5MB), `MeteoAlmoster_S.jpg` (2.5MB), `artana.jpg`
@@ -66,7 +67,7 @@ only — no CrUX field data exists yet for this project.
   `js/carto-style.js` — ~13KB combined estimated savings. Low effort, low
   impact relative to the above, but free.
 - **[Performance] 90 markers created synchronously on load.**
-  `js/map.js:addAllMarkers()` — 70 photo + 20 video webcams each get a DOM
+  `js/map.js:addAllMarkers()` — 70 photo + 20 video cameras each get a DOM
   element and a `maplibregl.Marker` instance in one synchronous pass.
   Contributes to Script Evaluation / Style & Layout time. Not isolated with
   its own before/after test — a hypothesis, not a measured finding. Worth
@@ -81,7 +82,7 @@ guessed from source alone:
 - **The `within` filter on label layers** (`js/carto-style.js`, flagged in an
   existing code comment as a known perf risk) — disabling it made no
   measurable difference.
-- **The webcam availability-check network calls entirely** — disabling them
+- **The camera availability-check network calls entirely** — disabling them
   improved FCP (2.9s → 1.6s) but LCP/TTI/TBT stayed just as bad, because the
   *photo* checks (`checkPhoto`, separate from `checkVideo`) were still
   running and are the actual weight problem.

@@ -1,6 +1,6 @@
 // Generic overlay for showing details about a selected map item. Layer-specific
-// code (e.g. the webcams layer) builds the content and calls showPlayer() with it —
-// this module knows nothing about webcams, photos, or video.
+// code (e.g. the cameras layer) builds the content and calls showPlayer() with it —
+// this module knows nothing about cameras, photos, or video.
 export function showPlayer({ mediaHtml, name, loc, badgeText, badgeClass }){
   document.getElementById('player-media').innerHTML = mediaHtml;
   document.getElementById('player-name').textContent = name;
