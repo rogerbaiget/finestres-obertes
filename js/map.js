@@ -89,7 +89,15 @@ async function updateContour(){
   }
 }
 
-async function addContourLayers(){
+// ringsPromise defaults to a fresh fetch (used by the theme-toggle fallback, an edge
+// case where nothing was pre-fetched), but the initial-load call site instead passes
+// one already kicked off at map construction time — pickContour() has no dependency
+// on the map's style/tiles/fonts being ready (map.getZoom() reflects the constructor's
+// fitBoundsOptions immediately, confirmed directly: it doesn't change once the style
+// finishes loading), so waiting for 'load' to even *start* this fetch was needlessly
+// chaining it behind the entire style load — measured on the live site as by far the
+// single longest request on the page (2.4s), worse than every other chain combined.
+async function addContourLayers(ringsPromise = pickContour(map.getZoom())){
   // Remove any leftovers from a previous style (defensive, avoids "already exists" errors)
   [ 'contour-outline-layer','contour-mask-layer' ].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
   [ maskSourceId, outlineSourceId ].forEach(id=>{ if(map.getSource(id)) map.removeSource(id); });
@@ -97,7 +105,7 @@ async function addContourLayers(){
   const style0 = getComputedStyle(document.documentElement);
   const maskColor = style0.getPropertyValue('--mask').trim() || '#050d14';
   const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
-  const geo = contourToGeoJSON(await pickContour(map.getZoom()));
+  const geo = contourToGeoJSON(await ringsPromise);
 
   const { maskBeforeId, beforeId } = computeInsertionPoints(map.getStyle().layers);
 
@@ -426,11 +434,16 @@ async function initMap(){
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
-  // Kicked off now rather than inside 'load' below: a layer's data (e.g. cameras,
-  // fetched from a Worker) has no actual dependency on the map's style/tiles/fonts
-  // finishing first, so starting the fetch in parallel with that avoids serializing
-  // two unrelated round trips into one long chain.
+  // Both kicked off now rather than inside 'load' below: neither a layer's data
+  // (e.g. cameras, fetched from a Worker) nor the initial contour level has any
+  // actual dependency on the map's style/tiles/fonts finishing first — map.getZoom()
+  // already reflects the constructor's fitBoundsOptions immediately, confirmed
+  // directly (it doesn't change once the style finishes loading). Starting both
+  // fetches in parallel with that avoids serializing unrelated round trips into one
+  // long chain — the contour fetch in particular, previously gated behind 'load'
+  // entirely, measured as the single longest request on the live site (2.4s).
   const layersLoaded = loadAllLayers();
+  const contourRingsLoaded = pickContour(map.getZoom());
 
   map.on('load', async ()=>{
     // Lock panning to whatever the constructor's fit above actually shows, rather than a guessed
@@ -443,7 +456,7 @@ async function initMap(){
     // The map itself is already interactive at this point — markers and the contour
     // pop in once their (already in-flight) data finishes loading, rather than
     // blocking the map on either fetch.
-    await Promise.all([addContourLayers(), layersLoaded]);
+    await Promise.all([addContourLayers(contourRingsLoaded), layersLoaded]);
     addAllMarkers();
   });
   map.on('zoomend', updateContour);
