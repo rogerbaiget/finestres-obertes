@@ -255,8 +255,26 @@ function addLayerMarkers(layer){
   if(layer._markers) layer._markers.forEach(m=>m.remove());
   layer._markers = layer.items.map(item=>{
     const el = layer.createMarkerElement(item);
-    el.addEventListener('click', ()=>layer.onSelect(item));
-    return new maplibregl.Marker({element:el}).setLngLat([item.lng, item.lat]).addTo(map);
+    const activate = ()=>layer.onSelect(item);
+    el.addEventListener('click', activate);
+    // Every marker is a button (it opens the item on activation), regardless of
+    // which layer it belongs to — set here rather than per-layer so a future layer
+    // gets correct semantics/keyboard support for free.
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.addEventListener('keydown', e=>{
+      if(e.key === 'Enter' || e.key === ' '){
+        e.preventDefault(); // stop Space from also scrolling the page
+        activate();
+      }
+    });
+    const marker = new maplibregl.Marker({element:el}).setLngLat([item.lng, item.lat]).addTo(map);
+    // maplibregl.Marker sets its own generic aria-label ("Map marker") on the
+    // element, identical across every marker regardless of layer — applied after
+    // construction so it overrides that, replacing it with an actual name a screen
+    // reader user can act on, whenever the layer provides one.
+    if(layer.getItemLabel) el.setAttribute('aria-label', layer.getItemLabel(item));
+    return marker;
   });
 }
 
