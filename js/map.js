@@ -35,15 +35,6 @@ function computeContourBounds(){
   return [[minLng,minLat],[maxLng,maxLat]];
 }
 
-function waitForStyleReady(callback){
-  // 'style.load' fires once the swapped-in style (layers/sources/sprite) is ready to
-  // accept addLayer calls. The previous 'styledata' listener never reliably re-fired
-  // once tiles were still loading, so the contour border/mask never came back after
-  // a theme toggle; 'idle' worked but only after full tile render, which left a
-  // multi-second gap (and a stacked race) when the toggle was clicked twice quickly.
-  map.once('style.load', callback);
-}
-
 function fitToContour(){
   map.fitBounds(computeContourBounds(), {padding:24, duration:0});
 }
@@ -128,6 +119,65 @@ function addAndorraCataloniaBorderLayer(beforeId){
     id:'andorra-catalonia-border-layer', type:'line', source:'andorra-catalonia-border',
     paint:{'line-color': style0.getPropertyValue('--sand').trim() || '#f1e4c8', 'line-width':0.8, 'line-opacity':0.45}
   }, beforeId);
+}
+
+// The 4 layers/sources above all get torn down and rebuilt by addContourLayers() —
+// fine on initial load, but on a theme toggle that meant a visible flicker: setStyle()'s
+// diff (see the click handler below) already drops them, since none of them are part of
+// either CARTO style JSON, and re-adding a GeoJSON source kicks off async tessellation,
+// so there's a frame or two where the mask/outline/comarques/Andorra-border are all gone.
+//
+// To avoid that, the toggle handler calls this first: it lifts the *current* (live)
+// definitions of these 4 layers/sources — unchanged except for the paint colors that
+// actually differ between themes — and splices them into the new style object before
+// handing it to setStyle(). Diffing then sees each of them present, in the same
+// position, in both the old and new serialized style, so it emits only the
+// setPaintProperty calls for the color change — no remove/add, no re-tessellation, no
+// flicker. Returns false (nothing spliced in) if the layers aren't there yet — e.g. a
+// toggle click racing the very first 'load' — so the caller can fall back to
+// addContourLayers().
+const CONTOUR_LAYER_IDS = ['contour-mask-layer','contour-outline-layer','comarques-outline-layer','andorra-catalonia-border-layer'];
+const CONTOUR_SOURCE_IDS = [maskSourceId, outlineSourceId, 'comarques', 'andorra-catalonia-border'];
+
+function preserveContourLayersAcrossStyleSwap(newStyle){
+  const current = map.getStyle();
+  const liveLayers = CONTOUR_LAYER_IDS.map(id => current.layers.find(l => l.id === id));
+  if(liveLayers.some(l => !l)) return false;
+
+  const style0 = getComputedStyle(document.documentElement);
+  const maskColor = style0.getPropertyValue('--mask').trim() || '#050d14';
+  const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
+  const sandColor = style0.getPropertyValue('--sand').trim() || '#f1e4c8';
+
+  const [maskLayer, outlineLayer, comarquesLayer, andorraLayer] = liveLayers.map(l => ({...l, paint: {...l.paint}}));
+  maskLayer.paint['fill-color'] = maskColor;
+  maskLayer.paint['fill-opacity'] = maskOpacity;
+  comarquesLayer.paint['line-color'] = sandColor;
+  andorraLayer.paint['line-color'] = sandColor;
+
+  newStyle.sources = {...newStyle.sources};
+  CONTOUR_SOURCE_IDS.forEach(id => { if(current.sources[id]) newStyle.sources[id] = current.sources[id]; });
+
+  // Same "insert relative to water-sea" positioning as addContourLayers(), computed
+  // against the new style's own layer order rather than the (about to be replaced)
+  // live one.
+  const seaLayerIdx = newStyle.layers.findIndex(l => l.id === 'water-sea');
+  const seaLayer = seaLayerIdx >= 0 ? newStyle.layers[seaLayerIdx] : null;
+  const afterSeaLayer = seaLayerIdx >= 0 ? newStyle.layers[seaLayerIdx + 1] : null;
+  const maskBeforeId = seaLayer ? seaLayer.id : undefined;
+  const beforeId = afterSeaLayer ? afterSeaLayer.id : maskBeforeId;
+
+  newStyle.layers = [...newStyle.layers];
+  function insertBefore(layer, targetId){
+    const idx = targetId ? newStyle.layers.findIndex(l => l.id === targetId) : -1;
+    if(idx === -1) newStyle.layers.push(layer);
+    else newStyle.layers.splice(idx, 0, layer);
+  }
+  insertBefore(maskLayer, maskBeforeId);
+  insertBefore(outlineLayer, beforeId);
+  insertBefore(comarquesLayer, beforeId);
+  insertBefore(andorraLayer, beforeId);
+  return true;
 }
 
 const COMARQUES_MIN_ZOOM = 8;
@@ -257,16 +307,22 @@ async function initMap(){
     const newTheme = document.documentElement.classList.contains('light') ? 'dark' : 'light';
     applyTheme(newTheme);
     const newStyle = await loadCartoStyle(newTheme);
-    // diff:false forces a full style teardown/reload. By default setStyle() diffs
-    // against the current style once one exists (true for every toggle after the
-    // first), which silently patches in place and never fires 'style.load' at all —
-    // that's why the border vanished and the guard below never got released.
-    map.setStyle(newStyle, {diff:false});
-    waitForStyleReady(()=>{
+    // Both themes share the same CARTO vector source/tiles/glyphs (only the sprite and
+    // each layer's paint/layout differ), so diffing — the setStyle() default — patches
+    // colors and swaps the sprite in place without refetching any tiles, unlike a full
+    // style teardown (diff:false). MapLibre 4.7's diff path (Style.setState) applies
+    // every add/removeLayer/setPaintProperty/etc. synchronously and fires no event
+    // afterwards, so — unlike the initial load, which waits for the map's 'load' event —
+    // the code below runs right after setStyle() returns, not from a callback.
+    const preserved = preserveContourLayersAcrossStyleSwap(newStyle);
+    map.setStyle(newStyle);
+    if(!preserved){
+      // First toggle raced the initial 'load' handler — nothing to preserve yet, so
+      // fall back to the same imperative add the initial load uses.
       addContourLayers();
       refreshContourColors();
-      themeSwitching = false;
-    });
+    }
+    themeSwitching = false;
   });
   applyTheme(initialTheme);
 }
