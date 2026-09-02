@@ -251,35 +251,83 @@ function refreshContourColors(){
   }
 }
 
-function addLayerMarkers(layer){
-  if(layer._markers) layer._markers.forEach(m=>m.remove());
-  layer._markers = layer.items.map(item=>{
-    const el = layer.createMarkerElement(item);
-    const activate = ()=>layer.onSelect(item);
-    el.addEventListener('click', activate);
-    // Every marker is a button (it opens the item on activation), regardless of
-    // which layer it belongs to — set here rather than per-layer so a future layer
-    // gets correct semantics/keyboard support for free.
-    el.setAttribute('role', 'button');
-    el.tabIndex = 0;
-    el.addEventListener('keydown', e=>{
-      if(e.key === 'Enter' || e.key === ' '){
-        e.preventDefault(); // stop Space from also scrolling the page
-        activate();
-      }
-    });
-    const marker = new maplibregl.Marker({element:el}).setLngLat([item.lng, item.lat]).addTo(map);
-    // maplibregl.Marker sets its own generic aria-label ("Map marker") on the
-    // element, identical across every marker regardless of layer — applied after
-    // construction so it overrides that, replacing it with an actual name a screen
-    // reader user can act on, whenever the layer provides one.
-    if(layer.getItemLabel) el.setAttribute('aria-label', layer.getItemLabel(item));
-    return marker;
+function themeClusterColors(){
+  const style0 = getComputedStyle(document.documentElement);
+  return [
+    style0.getPropertyValue('--sand').trim() || '#f1e4c8',
+    style0.getPropertyValue('--blue-dark').trim() || '#0a1f2e'
+  ];
+}
+
+// Adds (or re-adds, after a theme toggle's setStyle() wipes it — unlike the old DOM
+// markers, a GL source/layer IS part of the style, so it doesn't survive that) a
+// layer's items as a clustered GeoJSON source with GPU-drawn circle/symbol layers,
+// rather than one DOM element per item — far cheaper at this scale, since the
+// browser never creates or lays out 90 individual elements.
+//
+// Click/hover interactivity is wired once ever (guarded by _clusterInteractionWired)
+// rather than on every re-add: MapLibre's layer-filtered map.on() resolves the layer
+// id at event time, not at registration time, so a listener registered against
+// 'cameras-point-0' keeps working correctly across that layer being removed and
+// recreated with the same id — registering it again on every theme toggle would just
+// stack up duplicate handlers.
+function addClusteredLayer(layer){
+  const pointLayers = layer.buildPointLayers();
+  const clusterLayers = layer.buildClusterLayers(...themeClusterColors());
+  const pointIds = pointLayers.map((_, i)=>`${layer.id}-point-${i}`);
+  const clusterIds = clusterLayers.map((_, i)=>`${layer.id}-cluster-${i}`);
+
+  [...pointIds, ...clusterIds].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
+  if(map.getSource(layer.id)) map.removeSource(layer.id);
+
+  map.addSource(layer.id, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: layer.items.map(layer.toFeature) },
+    cluster: true, clusterRadius: layer.cluster.radius, clusterMaxZoom: layer.cluster.maxZoom
   });
+
+  // MapLibre's style validation rejects a `layout` key present with value undefined
+  // (as opposed to the key being absent entirely) — def.layout is only set for the
+  // cluster count's symbol layer, so it's spread in rather than always included.
+  pointLayers.forEach((def, i)=>{
+    map.addLayer({
+      id: pointIds[i], source: layer.id, type: def.type, paint: def.paint, ...(def.layout && {layout: def.layout}),
+      filter: def.extraFilter ? ['all', ['!', ['has','point_count']], def.extraFilter] : ['!', ['has','point_count']]
+    });
+  });
+  clusterLayers.forEach((def, i)=>{
+    map.addLayer({ id: clusterIds[i], source: layer.id, type: def.type, paint: def.paint, ...(def.layout && {layout: def.layout}), filter: ['has','point_count'] });
+  });
+
+  if(!layer._clusterInteractionWired){
+    layer._clusterInteractionWired = true;
+    // Only the layer(s) explicitly marked `interactive` get click/hover wiring — a
+    // sub-layer like the video glow only matches a subset of points (missing clicks
+    // on everything else), and wiring both the cluster circle and its count-text
+    // symbol layer would fire every click twice, since both cover the same features.
+    pointIds.filter((_, i)=>pointLayers[i].interactive).forEach(id=>{
+      map.on('mouseenter', id, ()=>{ map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', id, ()=>{ map.getCanvas().style.cursor = ''; });
+      map.on('click', id, e=> layer.onSelect(layer.fromFeature(e.features[0])) );
+    });
+    clusterIds.filter((_, i)=>clusterLayers[i].interactive).forEach(id=>{
+      map.on('mouseenter', id, ()=>{ map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', id, ()=>{ map.getCanvas().style.cursor = ''; });
+      map.on('click', id, e=>{
+        const feature = e.features[0];
+        // getClusterExpansionZoom is promise-based in this MapLibre version (not the
+        // Node-style callback its own type signature still documents) — confirmed
+        // directly against the library's source rather than assumed.
+        map.getSource(layer.id).getClusterExpansionZoom(feature.properties.cluster_id)
+          .then(zoom => map.easeTo({ center: feature.geometry.coordinates, zoom }))
+          .catch(()=>{});
+      });
+    });
+  }
 }
 
 function addAllMarkers(){
-  LAYERS.forEach(addLayerMarkers);
+  LAYERS.forEach(addClusteredLayer);
 }
 
 // A layer whose data doesn't ship with the site (e.g. cameras, fetched from a
@@ -384,6 +432,10 @@ async function initMap(){
       await addContourLayers();
       refreshContourColors();
     }
+    // Unlike the contour layers above, camera clusters have no preservation path —
+    // they're wiped by setStyle() every time regardless, so just re-add them from
+    // the already-loaded items (no refetch).
+    addAllMarkers();
     themeSwitching = false;
   });
   applyTheme(initialTheme);
