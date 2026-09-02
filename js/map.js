@@ -285,6 +285,12 @@ async function initMap(){
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
+  // Kicked off now rather than inside 'load' below: a layer's data (e.g. cameras,
+  // fetched from a Worker) has no actual dependency on the map's style/tiles/fonts
+  // finishing first, so starting the fetch in parallel with that avoids serializing
+  // two unrelated round trips into one long chain.
+  const layersLoaded = loadAllLayers();
+
   map.on('load', async ()=>{
     fitToContour();
     // Lock panning to whatever the fit above actually shows, rather than a guessed
@@ -295,10 +301,10 @@ async function initMap(){
     // for any window size/aspect ratio.
     map.setMaxBounds(map.getBounds());
     addContourLayers();
-    // The map itself is already interactive at this point — markers pop in once each
-    // layer's data (e.g. cameras, fetched from a Worker) finishes loading, rather than
-    // blocking the whole map on that fetch.
-    await loadAllLayers();
+    // The map itself is already interactive at this point — markers pop in once the
+    // (already in-flight) layer data finishes loading, rather than blocking the whole
+    // map on that fetch.
+    await layersLoaded;
     addAllMarkers();
   });
   map.on('zoomend', updateContour);
