@@ -259,11 +259,12 @@ function themeClusterColors(){
   ];
 }
 
-// Adds (or re-adds, after a theme toggle's setStyle() wipes it — unlike the old DOM
-// markers, a GL source/layer IS part of the style, so it doesn't survive that) a
-// layer's items as a clustered GeoJSON source with GPU-drawn circle/symbol layers,
-// rather than one DOM element per item — far cheaper at this scale, since the
-// browser never creates or lays out 90 individual elements.
+// Adds a layer's items as a clustered GeoJSON source with GPU-drawn circle/symbol
+// layers, rather than one DOM element per item — far cheaper at this scale, since the
+// browser never creates or lays out 90 individual elements. Normally called once,
+// after the initial load; a theme toggle instead goes through
+// preserveClusteredLayersAcrossStyleSwap() below and only falls back to a full re-add
+// here if that couldn't find anything to preserve.
 //
 // Click/hover interactivity is wired once ever (guarded by _clusterInteractionWired)
 // rather than on every re-add: MapLibre's layer-filtered map.on() resolves the layer
@@ -328,6 +329,46 @@ function addClusteredLayer(layer){
 
 function addAllMarkers(){
   LAYERS.forEach(addClusteredLayer);
+}
+
+// The clustered-layer equivalent of preserveContourLayersAcrossStyleSwap() above:
+// lifts a layer's *current* source/layers into the new style before setStyle() runs,
+// so the diff sees them already present and just patches paint properties instead of
+// tearing the source down and rebuilding it — the same flicker addClusteredLayer()'s
+// remove-then-add would otherwise cause on every theme toggle.
+//
+// The point/glow layers carry no theme-dependent colors (camera media/broken state
+// determines those, not light/dark mode), so their *live* definitions are copied
+// across unchanged, filter included. The cluster bubble/count layers do depend on
+// theme (--sand/--blue-dark), so rather than map.js needing to know which specific
+// paint properties that affects, it just asks the layer to build fresh cluster-layer
+// definitions for the new theme's colors — the same function used to add them in the
+// first place — and splices those in instead. Returns false (nothing to preserve) if
+// the layer's source was never added yet, e.g. a toggle racing the very first load.
+function spliceClusteredLayer(newStyle, layer){
+  const current = map.getStyle();
+  if(!current.sources[layer.id]) return false;
+
+  const pointIds = layer.buildPointLayers().map((_, i)=>`${layer.id}-point-${i}`);
+  const livePointLayers = pointIds.map(id => current.layers.find(l => l.id === id));
+  if(livePointLayers.some(l => !l)) return false;
+
+  const clusterLayers = layer.buildClusterLayers(...themeClusterColors());
+  const clusterIds = clusterLayers.map((_, i)=>`${layer.id}-cluster-${i}`);
+
+  newStyle.sources = {...newStyle.sources, [layer.id]: current.sources[layer.id]};
+  newStyle.layers = [...newStyle.layers, ...livePointLayers];
+  clusterLayers.forEach((def, i)=>{
+    newStyle.layers.push({
+      id: clusterIds[i], source: layer.id, type: def.type, paint: def.paint,
+      ...(def.layout && {layout: def.layout}), filter: ['has','point_count']
+    });
+  });
+  return true;
+}
+
+function preserveClusteredLayersAcrossStyleSwap(newStyle){
+  return LAYERS.every(layer => spliceClusteredLayer(newStyle, layer));
 }
 
 // A layer whose data doesn't ship with the site (e.g. cameras, fetched from a
@@ -425,6 +466,7 @@ async function initMap(){
     // afterwards, so — unlike the initial load, which waits for the map's 'load' event —
     // the code below runs right after setStyle() returns, not from a callback.
     const preserved = preserveContourLayersAcrossStyleSwap(newStyle);
+    const clustersPreserved = preserveClusteredLayersAcrossStyleSwap(newStyle);
     map.setStyle(newStyle);
     if(!preserved){
       // First toggle raced the initial 'load' handler — nothing to preserve yet, so
@@ -432,10 +474,12 @@ async function initMap(){
       await addContourLayers();
       refreshContourColors();
     }
-    // Unlike the contour layers above, camera clusters have no preservation path —
-    // they're wiped by setStyle() every time regardless, so just re-add them from
-    // the already-loaded items (no refetch).
-    addAllMarkers();
+    if(!clustersPreserved){
+      // Same situation as above, for camera clusters — nothing existed yet to lift
+      // into the new style, so just add them fresh (from the already-loaded items,
+      // no refetch).
+      addAllMarkers();
+    }
     themeSwitching = false;
   });
   applyTheme(initialTheme);
