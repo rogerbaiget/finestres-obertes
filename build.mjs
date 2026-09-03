@@ -1,16 +1,22 @@
 import { build } from 'esbuild';
-import { rm, mkdir, cp, readFile, writeFile } from 'node:fs/promises';
+import { rm, mkdir, cp, copyFile, readFile, writeFile } from 'node:fs/promises';
 
 const OUT = 'dist';
 
 await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
 
-// Bundle map.js's full import graph into one minified ESM file. maplibregl is
-// referenced as a bare free identifier (never imported — it's attached to
-// window by the separately-loaded CDN script), which esbuild's minifier
-// never renames, so that keeps working unchanged. format:'esm' keeps
-// index.html's <script type="module"> tag valid with no changes needed.
+// Bundle our own code together with maplibre-gl itself. Measured directly
+// against two alternatives — loading MapLibre from a jsdelivr CDN, and
+// self-hosting its own split output via a same-origin import map — and once
+// fairly compared (matched compression, repeated runs to rule out noise from
+// live tile-fetch variance) all three land in the same ~5,000-5,600ms Total
+// Blocking Time range: that cost comes from MapLibre v6's own rendering work,
+// not from how its JS is delivered. So the loading strategy is chosen on
+// other grounds: bundling keeps MapLibre version bumps as a single rebuild
+// (no separate vendor files to keep in sync with map.js), and needs no
+// browser import-map support. format:'esm' keeps index.html's
+// <script type="module"> tag valid.
 await build({
   entryPoints: ['src/js/map.js'],
   outfile: `${OUT}/js/map.js`,
@@ -21,6 +27,19 @@ await build({
   sourcemap: true,
   logLevel: 'info',
 });
+
+// The Worker thread MapLibre spawns for tile processing runs in its own
+// execution context with its own module registry — it can't reach into the
+// main bundle above, so it needs its own real copy of maplibre-gl-worker.mjs,
+// which in turn statically imports a maplibre-gl-shared.mjs sibling. Copying
+// only the worker (as MapLibre's own docs snippet shows) reproduces a silent
+// hang — confirmed via their own test/integration/bundler/esbuild fixture,
+// which copies both. map.js's setWorkerUrl() call points at this exact path.
+// CSS goes to dist/ root (sibling to styles.css) via a plain copy, not a JS
+// import, so esbuild doesn't derive a second stylesheet from map.js's basename.
+await copyFile('node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs', `${OUT}/js/maplibre-gl-worker.mjs`);
+await copyFile('node_modules/maplibre-gl/dist/maplibre-gl-shared.mjs', `${OUT}/js/maplibre-gl-shared.mjs`);
+await copyFile('node_modules/maplibre-gl/dist/maplibre-gl.css', `${OUT}/maplibre-gl.css`);
 
 // Single file, no @import chain — minify only, no bundling needed.
 await build({

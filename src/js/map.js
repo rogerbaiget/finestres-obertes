@@ -1,3 +1,10 @@
+import * as maplibregl from 'maplibre-gl';
+// Mandatory once bundled: import.meta.url inside MapLibre's own source now
+// resolves to this bundle's chunk, not MapLibre's real location, so its
+// normal worker auto-detection would 404 silently (no error, load never
+// fires — see MapLibre issue #8018). This path must match where build.mjs
+// copies maplibre-gl-worker.mjs relative to this file's own output location.
+maplibregl.setWorkerUrl(new URL('./maplibre-gl-worker.mjs', import.meta.url).toString());
 import { ANDORRA_CATALONIA_BORDER } from './data/andorra-catalonia-border.js';
 import {
   CONTOUR_LOCAL_VERY_LOW, loadLow, loadLocal, loadDetail, loadVeryFine, loadFinest, loadMax

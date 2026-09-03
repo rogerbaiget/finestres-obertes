@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.7.0"
   }
 }
