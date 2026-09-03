@@ -30,7 +30,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Finestres obertes — Càmeres dels Països Catalans</title>
-<link rel="stylesheet" href="maplibre-gl.css">
+<!-- Non-blocking (media=print trick, same as the Google Fonts link below): MapLibre's
+     controls/popups are DOM nodes MapLibre itself creates via JS, so they can't exist
+     before app.js runs anyway — by which time this small (10KB), early-requested file
+     has had far longer to arrive than app.js's own 265KB bundle. Measured no visible
+     flash of unstyled controls before keeping this; see PERFORMANCE.md. -->
+<link rel="stylesheet" href="maplibre-gl.css" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="maplibre-gl.css"></noscript>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <!-- crossorigin is required here (unlike the fonts.googleapis.com preconnect above):
      loadCartoStyle() fetches style.json via fetch(), which uses CORS mode, opening a
