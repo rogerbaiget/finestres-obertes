@@ -208,6 +208,37 @@ function removeCountryBorders(style){
   style.layers = style.layers.filter(l => !COUNTRY_BORDER_LAYER_IDS.includes(l.id));
 }
 
+// CARTO's full positron/dark-matter styles ship every layer a general-purpose basemap
+// needs, most of it irrelevant to a small camera-location map: building footprints,
+// house numbers, CARTO's own POI icons (we have our own markers for that), airport
+// runways/taxiways, and — the largest single chunk — a separate line layer for every
+// combination of road class × tunnel/bridge/surface × case/fill styling. Even where a
+// removed layer's minzoom never matches this site's actual usage range, MapLibre still
+// pays a one-time setup cost per layer at style-load time (paint/layout expression
+// compilation) for every layer in the style regardless of whether anything ever
+// renders from it — confirmed directly, via queryRenderedFeatures() at the real
+// overview zoom, that only 20 of the base style's 93 layers ever render a single
+// feature there. Kept: state/comarca boundaries, major roads (secondary and up,
+// including their own tunnels/bridges) for orientation, and every place/water-name
+// label — including ones below town level, since those only become relevant once
+// someone zooms into a specific area, which happens.
+const UNUSED_LAYER_IDS = [
+  // Not relevant to a camera-location map at any zoom: our own markers are the POIs.
+  'building', 'building-top', 'housenumber', 'poi_stadium', 'poi_park',
+  'aeroway-runway', 'aeroway-taxiway',
+  // Fine road detail (service/minor/path/rail) that only ever shows deep zoomed in,
+  // and isn't useful there either — secondary/primary/trunk/motorway (and their own
+  // tunnels/bridges) stay untouched for orientation at every zoom this site reaches.
+  'tunnel_service_case', 'tunnel_minor_case', 'tunnel_path', 'tunnel_service_fill', 'tunnel_minor_fill',
+  'tunnel_rail', 'tunnel_rail_dash',
+  'road_service_case', 'road_minor_case', 'road_path', 'road_service_fill', 'road_minor_fill',
+  'bridge_service_case', 'bridge_minor_case', 'bridge_path', 'bridge_service_fill', 'bridge_minor_fill',
+  'rail', 'rail_dash'
+];
+function removeUnusedLayers(style){
+  style.layers = style.layers.filter(l => !UNUSED_LAYER_IDS.includes(l.id));
+}
+
 export async function loadCartoStyle(mode){
   const url = mode === 'light'
     ? 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -216,6 +247,7 @@ export async function loadCartoStyle(mode){
   const style = await res.json();
   moveLayerBefore(style, 'place_state', 'place_hamlet');
   removeCountryBorders(style);
+  removeUnusedLayers(style);
   splitSeaFromInlandWater(style);
   showOnlyRivers(style);
   increaseWaterContrast(style, mode);
