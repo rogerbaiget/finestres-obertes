@@ -30,7 +30,7 @@ export const REGION_LABEL_HALO = { light: 'rgba(255,255,255,0.55)', dark: 'rgba(
 
 // One shared layout for every region/country-level label (Catalunya, País Valencià,
 // Andorra via place_state/place_country_1/place_country_2 below, plus Illes Balears
-// and l'Alguer's own custom layers in map.js) — exported so map.js can reuse it
+// and l'Alguer's own custom layers in app.js) — exported so app.js can reuse it
 // verbatim instead of duplicating values that could drift out of sync. Needed because
 // CARTO's place_country_1/place_country_2 ship their OWN, smaller text-size stops
 // (e.g. 12 at zoom 6) than place_state's (14 at zoom 6) — without overriding it,
@@ -139,7 +139,7 @@ function moveLayerBefore(style, layerId, beforeLayerId){
 
 // CARTO's single 'water' layer covers ocean, sea, lake, pond, and river polygons alike
 // with no class-based distinction. Splitting it lets the mask (inserted later, in
-// map.js) sit between the two: inland water (lake/river) stays dimmed outside the
+// app.js) sit between the two: inland water (lake/river) stays dimmed outside the
 // region like any other foreign feature, while ocean/sea — placed back on top of the
 // mask — doesn't get a visible haze painted over open water. Ponds are dropped
 // entirely: only rivers and lakes are meant to show.
@@ -160,7 +160,7 @@ function splitSeaFromInlandWater(style){
   // before the first symbol layer), not where the original 'water' layer was. CARTO's
   // roads, railways, bridges, buildings, and country-border lines all render *after*
   // that original position — if 'water-sea' (and the mask, inserted just before it in
-  // map.js) stayed there too, every one of those layers would render on top of the
+  // app.js) stayed there too, every one of those layers would render on top of the
   // mask outside the region, undimmed. Moving 'water-sea' to the end means the mask
   // ends up after all of them (dimming them, as intended) and still just before
   // 'water-sea' (keeping the sea itself undimmed).
@@ -198,7 +198,7 @@ function increaseWaterContrast(style, mode){
 // drawing them would visually contradict the whole point of the contour outline.
 // Region (admin_level 4) and county/comarca (admin_level 6) boundaries are untouched.
 // (The Andorra/Catalonia border is drawn separately, as its own static line layer in
-// map.js, restyled to look internal — see addAndorraCataloniaBorderLayer there. It
+// app.js, restyled to look internal — see addAndorraCataloniaBorderLayer there. It
 // can't be recovered from these layers via a style filter: MapLibre's 'within' only
 // matches a feature whose ENTIRE geometry sits inside the given polygon, and CARTO's
 // per-tile boundary lines run the whole way around Andorra — both the Catalonia and
@@ -262,7 +262,7 @@ export async function loadCartoStyle(mode){
         base
       ];
       // l'Alguer is drawn as our own big region-style label instead (see
-      // addRegionLabels() in map.js), matching Illes Balears/Catalunya/País
+      // addRegionLabels() in app.js), matching Illes Balears/Catalunya/País
       // Valencià, rather than fading in as a small town dot at some zoom threshold
       // — which would just duplicate it. Excluded from every CARTO label layer
       // rather than picking one "handoff" zoom: confirmed directly that more than

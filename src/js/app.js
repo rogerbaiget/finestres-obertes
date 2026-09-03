@@ -464,7 +464,7 @@ function addAllMarkers(){
 // The point/glow layers carry no theme-dependent colors (camera media/broken state
 // determines those, not light/dark mode), so their *live* definitions are copied
 // across unchanged, filter included. The cluster bubble/count layers do depend on
-// theme (--sand/--blue-dark), so rather than map.js needing to know which specific
+// theme (--sand/--blue-dark), so rather than app.js needing to know which specific
 // paint properties that affects, it just asks the layer to build fresh cluster-layer
 // definitions for the new theme's colors — the same function used to add them in the
 // first place — and splices those in instead. Returns false (nothing to preserve) if
@@ -496,7 +496,7 @@ function preserveClusteredLayersAcrossStyleSwap(newStyle){
 }
 
 // A layer whose data doesn't ship with the site (e.g. cameras, fetched from a
-// Worker) implements load(); map.js just awaits whichever layers have one, generic
+// Worker) implements load(); app.js just awaits whichever layers have one, generic
 // to any future layer, before drawing markers.
 async function loadAllLayers(){
   await Promise.all(LAYERS.map(layer => layer.load ? layer.load() : null));

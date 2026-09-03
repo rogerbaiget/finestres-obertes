@@ -8,7 +8,7 @@ import { loadCameras } from './load.js';
 // options, the MapLibre circle/symbol layers to draw for individual points and for
 // clusters (buildPointLayers/buildClusterLayers), how to recover an item from a
 // clicked feature (fromFeature), what happens when one is selected (onSelect), and
-// an optional legend describing what its marker colors mean. map.js knows nothing
+// an optional legend describing what its marker colors mean. app.js knows nothing
 // about cameras specifically — it only knows this shape, so a future layer (e.g.
 // weather stations, points of interest) is added the same way, in its own
 // js/layers/<name>/ folder.

@@ -1,7 +1,7 @@
 // Andorra's full border loop — both the Catalonia-facing side and the France-facing
 // side — extracted from Andorra's OSM admin boundary (relation 9407, outer ways,
 // stitched into one closed ring) and drawn in a single uniform internal-boundary
-// style (see addAndorraCataloniaBorderLayer in map.js). An earlier version drew only
+// style (see addAndorraCataloniaBorderLayer in app.js). An earlier version drew only
 // the Catalonia-facing arc, leaving the France side as a genuine gap; that read as
 // a broken line rather than the intended "Andorra is a complete internal enclave"
 // look, so the full loop is drawn instead — including the France side means drawing

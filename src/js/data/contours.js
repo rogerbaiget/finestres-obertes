@@ -21,7 +21,7 @@
 // Capella (Aragonese-speaking town centres — only specific outlying hamlets Catalan),
 // and every other Aragonese-speaking municipality in the strip.
 //
-// Split into 7 zoom-keyed detail levels (see pickContourLevel() in map.js), coarsest
+// Split into 7 zoom-keyed detail levels (see pickContourLevel() in app.js), coarsest
 // to finest. Only CONTOUR_LOCAL_VERY_LOW — small, and needed synchronously for the
 // very first fitBounds() call plus carto-style.js's contour mask — is an eager JS
 // export here. The other 6 (34KB-320KB each) are fetched from contours/<level>.json
