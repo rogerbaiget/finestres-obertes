@@ -28,6 +28,7 @@ jobs:
       - run: npm run build
 
       - name: Publish to Cloudflare Pages
+        id: deploy
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -43,3 +44,16 @@ jobs:
           # own git-dirty check (unrelated to the Node-version issue above)
           # always sees untracked files here and warns without it.
           command: pages deploy dist --project-name=finestres-obertes --commit-dirty=true
+
+      # wrangler-action, unlike cloudflare/pages-action before it, doesn't write a
+      # job summary on its own — reconstruct the same panel from its own outputs.
+      - name: Deploy summary
+        run: |
+          {
+            echo "# Deploying with Cloudflare Pages"
+            echo
+            echo "| Name | Result |"
+            echo "| --- | --- |"
+            echo "| **Deployment URL** | ${{ steps.deploy.outputs.deployment-url }} |"
+            echo "| **Alias URL** | ${{ steps.deploy.outputs.pages-deployment-alias-url }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
