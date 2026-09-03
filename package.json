@@ -8,7 +8,8 @@
     "serve:dist": "python3 -m http.server 8420 --directory dist"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.129.0"
   },
   "dependencies": {
     "maplibre-gl": "^6.7.0"
