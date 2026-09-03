@@ -2,7 +2,7 @@ import { ANDORRA_CATALONIA_BORDER } from './data/andorra-catalonia-border.js';
 import {
   CONTOUR_LOCAL_VERY_LOW, loadLow, loadLocal, loadDetail, loadVeryFine, loadFinest, loadMax
 } from './data/contours.js';
-import { loadCartoStyle } from './carto-style.js';
+import { loadCartoStyle, REGION_LABEL_COLOR, REGION_LABEL_HALO, REGION_LABEL_LAYOUT } from './carto-style.js';
 import { applyTheme } from './theme.js';
 import { wirePlayerControls } from './ui/player.js';
 import { camerasLayer } from './layers/cameras/index.js';
@@ -114,6 +114,10 @@ async function addContourLayers(ringsPromise = pickContour(map.getZoom())){
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 
   addAndorraCataloniaBorderLayer(beforeId);
+  // Not added here: addRegionLabels() needs to run before camera markers exist (see
+  // call sites below), so marker circles paint on top of region-name text instead of
+  // the reverse — a marker sitting right under a big region label reads better when
+  // its own circle/count stays fully visible.
 }
 
 // Andorra/Catalonia is the one country border kept on the map (see js/carto-style.js
@@ -149,6 +153,71 @@ function addAndorraCataloniaBorderLayer(beforeId){
     id:'andorra-catalonia-border-layer', type:'line', source:'andorra-catalonia-border',
     paint: BOUNDARY_STATE_PAINT[mode]
   }, beforeId);
+}
+
+// Region-style labels for places CARTO's own place data doesn't give a usable one
+// for: Illes Balears has no region-level ("state") label at all — only per-island
+// names like "Mallorca" — since the archipelago isn't a single contiguous shape with
+// a natural label point; l'Alguer only has small town-level entries in CARTO's own
+// data (excluded in carto-style.js, so this is its only label at any zoom). Both
+// drawn here instead, using REGION_LABEL_LAYOUT/REGION_LABEL_COLOR imported from
+// carto-style.js so they can't drift out of sync with place_state/place_country's own
+// (also-overridden-there) styling.
+const REGION_LABEL_IDS = ['illes-balears-label-layer', 'alguer-label-layer'];
+const REGION_SOURCE_IDS = ['illes-balears-label', 'alguer-label'];
+
+function extraRegionLabelGeoJSON(name, lng, lat){
+  return {type:'Feature', properties:{name}, geometry:{type:'Point', coordinates:[lng, lat]}};
+}
+
+// [name, lng, lat] for each custom label. l'Alguer's point is offset a little out to
+// sea, northwest of the city itself (8.3154, 40.5587) — centered exactly on it, our
+// big uppercase label sat right on top of CARTO's own (small) town dot and name,
+// crowding both.
+const REGION_LABEL_POINTS = [
+  ['Illes Balears', 2.2, 39.3],
+  ["l'Alguer", 8.05, 40.60]
+];
+
+function regionLabelPaint(mode){
+  return {'text-color': REGION_LABEL_COLOR[mode], 'text-halo-color': REGION_LABEL_HALO[mode], 'text-halo-width': 0.8};
+}
+
+function addRegionLabels(){
+  REGION_LABEL_IDS.forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
+  REGION_SOURCE_IDS.forEach(id=>{ if(map.getSource(id)) map.removeSource(id); });
+
+  const mode = document.documentElement.classList.contains('light') ? 'light' : 'dark';
+  const paint = regionLabelPaint(mode);
+  REGION_LABEL_POINTS.forEach(([name, lng, lat], i)=>{
+    map.addSource(REGION_SOURCE_IDS[i], {type:'geojson', data: extraRegionLabelGeoJSON(name, lng, lat)});
+    map.addLayer({
+      id: REGION_LABEL_IDS[i], type:'symbol', source: REGION_SOURCE_IDS[i],
+      layout: {...REGION_LABEL_LAYOUT, 'text-field': ['get','name']}, paint
+    });
+  });
+}
+
+// The custom-label equivalent of preserveContourLayersAcrossStyleSwap() below: lifts
+// the *current* (live) source/layer definitions into the new style before setStyle()
+// runs, with only the paint colors patched for the new theme, so the diff sees them
+// already present and unchanged geometry-wise — just a setPaintProperty, not a
+// remove/re-add. Without this, Illes Balears/l'Alguer visibly disappeared and popped
+// back in on every theme toggle (setStyle's diff drops them, since neither is part of
+// either CARTO style JSON, then addRegionLabels() rebuilt them from scratch a beat
+// later) — the same flicker the contour/cluster layers would have had without their
+// own preservation. Returns false if nothing's there yet (e.g. a toggle racing the
+// very first load), so the caller can fall back to a fresh addRegionLabels().
+function preserveRegionLabelsAcrossStyleSwap(newStyle, newMode){
+  const current = map.getStyle();
+  const liveLayers = REGION_LABEL_IDS.map(id => current.layers.find(l => l.id === id));
+  if(liveLayers.some(l => !l)) return false;
+
+  const paint = regionLabelPaint(newMode);
+  newStyle.sources = {...newStyle.sources};
+  REGION_SOURCE_IDS.forEach(id => { if(current.sources[id]) newStyle.sources[id] = current.sources[id]; });
+  newStyle.layers = [...newStyle.layers, ...liveLayers.map(l => ({...l, paint}))];
+  return true;
 }
 
 // The layers/sources above all get torn down and rebuilt by addContourLayers() — fine
@@ -412,6 +481,7 @@ async function initMap(){
     // pop in once their (already in-flight) data finishes loading, rather than
     // blocking the map on either fetch.
     await Promise.all([addContourLayers(contourRingsLoaded), layersLoaded]);
+    addRegionLabels();
     addAllMarkers();
   });
   map.on('zoomend', updateContour);
@@ -432,7 +502,11 @@ async function initMap(){
     // every add/removeLayer/setPaintProperty/etc. synchronously and fires no event
     // afterwards, so — unlike the initial load, which waits for the map's 'load' event —
     // the code below runs right after setStyle() returns, not from a callback.
+    // Spliced in this order (labels, then clusters) because each push()es onto the end
+    // of newStyle.layers — so if both fall through to a fresh add below, labels are
+    // still added (and thus painted) before markers, keeping marker circles on top.
     const preserved = preserveContourLayersAcrossStyleSwap(newStyle);
+    const labelsPreserved = preserveRegionLabelsAcrossStyleSwap(newStyle, newTheme);
     const clustersPreserved = preserveClusteredLayersAcrossStyleSwap(newStyle);
     map.setStyle(newStyle);
     if(!preserved){
@@ -440,6 +514,11 @@ async function initMap(){
       // fall back to the same imperative add the initial load uses.
       await addContourLayers();
       refreshContourColors();
+    }
+    if(!labelsPreserved){
+      // Same situation as above, for Illes Balears/l'Alguer — nothing existed yet to
+      // lift into the new style, so just add them fresh.
+      addRegionLabels();
     }
     if(!clustersPreserved){
       // Same situation as above, for camera clusters — nothing existed yet to lift

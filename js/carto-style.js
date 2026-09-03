@@ -8,6 +8,49 @@ const CONTOUR_MASK_GEOMETRY = {
   coordinates: CONTOUR_LOCAL_VERY_LOW.map(ring => [ring.map(([lat,lng])=>[lng,lat])])
 };
 
+// OSM's official name for the Valencian Community; used both to relabel it "País
+// Valencià" and (in restrictToContour below) to exempt it from the contour check by
+// name rather than disabling that check for every region label.
+const VALENCIA_NAME_OVERRIDES = ['Comunitat Valenciana', 'Comunidad Valenciana', 'Comunitat Valenciana / Comunidad Valenciana'];
+
+// CARTO's own place_state color is a desaturated blue-gray that reads as an imported
+// hue against this site's warm sand/ink palette. Using the site's own ink color
+// instead (styles.css's --white — near-black on light, near-cream on dark) at reduced
+// opacity ties the labels to the rest of the page instead of CARTO's default, and
+// still reads as secondary/background text rather than competing with foreground UI.
+export const REGION_LABEL_COLOR = { light: 'rgba(28,21,13,0.7)', dark: 'rgba(251,247,238,0.7)' };
+
+// A thin, translucent halo/stroke so region labels stay legible over the (blue-ish)
+// sea fill, not just land. Opposite polarity from the text itself (white behind dark
+// ink on light theme, black behind light ink on dark theme) rather than matching
+// either theme's ink — same color for both would make the stroke invisible against
+// its own text — kept translucent and thin so it reads as a soft edge, not a sticker
+// outline.
+export const REGION_LABEL_HALO = { light: 'rgba(255,255,255,0.55)', dark: 'rgba(0,0,0,0.55)' };
+
+// One shared layout for every region/country-level label (Catalunya, País Valencià,
+// Andorra via place_state/place_country_1/place_country_2 below, plus Illes Balears
+// and l'Alguer's own custom layers in map.js) — exported so map.js can reuse it
+// verbatim instead of duplicating values that could drift out of sync. Needed because
+// CARTO's place_country_1/place_country_2 ship their OWN, smaller text-size stops
+// (e.g. 12 at zoom 6) than place_state's (14 at zoom 6) — without overriding it,
+// Andorra's label renders visibly smaller than Catalunya's/País Valencià's, confirmed
+// directly against both of CARTO's style.jsons.
+export const REGION_LABEL_LAYOUT = {
+  'text-font': ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular', 'HanWangHeiLight Regular', 'NanumBarunGothic Regular'],
+  'text-size': ['interpolate', ['linear'], ['zoom'], 5, 12, 7, 14],
+  'text-transform': 'uppercase',
+  'text-max-width': 9,
+  // Region/country-level labels are the most important text on the map and few enough
+  // to never meaningfully clutter it, so they always render even if MapLibre's
+  // collision detection would otherwise suppress them — confirmed directly (via
+  // showCollisionBoxes) that "PAÍS VALENCIÀ" was losing a collision fight against a
+  // nearby camera cluster's count label. allow-overlap keeps it visible regardless of
+  // what's nearby; ignore-placement stops it from then blocking whatever comes next.
+  'text-allow-overlap': true,
+  'text-ignore-placement': true
+};
+
 function propertyExpression(key){
   // "$type"/"$id" are legacy-filter pseudo-properties, not real feature properties —
   // ["get","$type"] would just return undefined, silently breaking the filter.
@@ -59,11 +102,25 @@ function toExpressionFilter(filter){
 // reprojects the whole contour polygon per evaluated feature with no caching, so
 // applying it to fill/line layers too (which have vastly more features than labels)
 // made every tile load extremely slow — occasionally hanging the page outright.
+//
+// "Comunitat Valenciana" is exempted by name (place_state only): its OSM label point
+// (-0.76, 39.68) falls in the region's non-Catalan-speaking interior, outside our
+// contour, so the 'within' check silently dropped "PAÍS VALENCIÀ" entirely — a
+// region's single anchor point can legitimately sit outside our contour even when
+// most of the region is inside it. Exempted by name rather than skipping the check
+// for place_state entirely, so neighbouring regions genuinely outside the Catalan
+// Countries (Aragón, Navarra, ...) stay correctly hidden — confirmed directly: a
+// blanket skip let those back in and, worse, put them in collision with "PAÍS
+// VALENCIÀ" for the same label space, hiding it just as before but for a new reason.
 function restrictToContour(layer){
   if(!layer.source || !(layer.layout && layer.layout['text-field'])) return;
-  layer.filter = layer.filter
-    ? ['all', toExpressionFilter(layer.filter), ['within', CONTOUR_MASK_GEOMETRY]]
+  const nameExpr = ['coalesce', ['get','name:ca'], ['get','name']];
+  const withinExpr = layer.id === 'place_state'
+    ? ['any', ['within', CONTOUR_MASK_GEOMETRY], ['in', nameExpr, ['literal', VALENCIA_NAME_OVERRIDES]]]
     : ['within', CONTOUR_MASK_GEOMETRY];
+  layer.filter = layer.filter
+    ? ['all', toExpressionFilter(layer.filter), withinExpr]
+    : withinExpr;
 }
 
 // MapLibre places symbol labels in layer order and won't let a later layer's label
@@ -165,21 +222,47 @@ export async function loadCartoStyle(mode){
   // Force every label to use the Catalan name field, falling back to the default name.
   // A few names are then overridden: OSM's official "Comunitat Valenciana" is replaced
   // with the more commonly used "País Valencià".
-  const NAME_OVERRIDES = ['Comunitat Valenciana', 'Comunidad Valenciana', 'Comunitat Valenciana / Comunidad Valenciana'];
   style.layers.forEach(layer=>{
     if(layer.layout && layer.layout['text-field']){
       const base = ['coalesce', ['get','name:ca'], ['get','name']];
       layer.layout['text-field'] = ['case',
-        ['in', base, ['literal', NAME_OVERRIDES]], 'País Valencià',
+        ['in', base, ['literal', VALENCIA_NAME_OVERRIDES]], 'País Valencià',
         base
       ];
+      // l'Alguer is drawn as our own big region-style label instead (see
+      // addRegionLabels() in map.js), matching Illes Balears/Catalunya/País
+      // Valencià, rather than fading in as a small town dot at some zoom threshold
+      // — which would just duplicate it. Excluded from every CARTO label layer
+      // rather than picking one "handoff" zoom: confirmed directly that more than
+      // one layer can show a town name (place_town at minzoom 8, but also
+      // place_city_dot_z7 — a catch-all for anything not country/state — from
+      // minzoom 7), so a single cutoff still left a stretch showing both.
+      if(layer.id !== 'place_state'){
+        const excludeAlguer = ['!', ['==', base, "l'Alguer"]];
+        layer.filter = layer.filter ? ['all', layer.filter, excludeAlguer] : excludeAlguer;
+      }
     }
     // Region/state labels (e.g. "place_state") sometimes have a strict "rank" filter
     // in CARTO's style that can exclude a territory entirely, regardless of zoom.
     // Relax it so "País Valencià" (and similar) always gets a chance to render.
     if(layer.id === 'place_state'){
       layer.filter = ['==', ['get','class'], 'state'];
+    }
+    // Catalunya/País Valencià (place_state) and Andorra (place_country_1 or _2,
+    // depending on its rank — not place_state, since it's a country not a region) ship
+    // with different layout AND paint in CARTO's own style (different text-size
+    // stops, different color/halo) — overridden here, identically for all three, so
+    // the three read as one consistent set rather than Andorra looking like a smaller,
+    // differently-colored afterthought. minzoom/maxzoom is likewise unified to
+    // place_state's own range rather than place_country_1's narrower one (which would
+    // otherwise make Andorra's label vanish above zoom 7).
+    if(layer.id === 'place_state' || layer.id === 'place_country_1' || layer.id === 'place_country_2'){
       layer.minzoom = 0;
+      layer.maxzoom = 10;
+      layer.layout = { ...layer.layout, ...REGION_LABEL_LAYOUT };
+      layer.paint['text-color'] = REGION_LABEL_COLOR[mode];
+      layer.paint['text-halo-color'] = REGION_LABEL_HALO[mode];
+      layer.paint['text-halo-width'] = 0.8;
     }
   });
   style.layers.forEach(restrictToContour);
