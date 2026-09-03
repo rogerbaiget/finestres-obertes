@@ -1,4 +1,3 @@
-import { loadComarques } from './data/comarques.js';
 import { ANDORRA_CATALONIA_BORDER } from './data/andorra-catalonia-border.js';
 import {
   CONTOUR_LOCAL_VERY_LOW, loadLow, loadLocal, loadDetail, loadVeryFine, loadFinest, loadMax
@@ -60,8 +59,8 @@ function pickContour(zoom){
 // and right before the first *late* label layer ('watername_ocean'). Using 'water-sea'
 // as the shared reference point puts everything in the right place: the mask goes
 // immediately before it (ending up after all land-detail layers, so they're dimmed
-// outside the region), while the outline/comarques/Andorra-border layers go
-// immediately after it (staying crisp, on top of both the mask and the sea).
+// outside the region), while the outline layer goes immediately after it (staying
+// crisp, on top of both the mask and the sea).
 function computeInsertionPoints(layers){
   const seaLayerIdx = layers.findIndex(l => l.id === 'water-sea');
   const seaLayer = seaLayerIdx >= 0 ? layers[seaLayerIdx] : null;
@@ -114,14 +113,29 @@ async function addContourLayers(ringsPromise = pickContour(map.getZoom())){
   map.addSource(outlineSourceId, {type:'geojson', data: geo.outline});
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 
-  updateComarquesVisibility();
   addAndorraCataloniaBorderLayer(beforeId);
 }
 
 // Andorra/Catalonia is the one country border kept on the map (see js/carto-style.js
 // for why every other one is dropped): both sides sit inside the Catalan Countries
-// contour, so it's styled like an internal boundary — same look as comarques — rather
-// than the international border line CARTO would otherwise draw.
+// contour, so it's styled to look exactly like CARTO's own internal region boundaries
+// (e.g. the Catalonia/Franja de Ponent line) rather than the international border
+// line CARTO would otherwise draw — paint values copied directly from CARTO's own
+// 'boundary_state' layer (admin_level 4) in both style.jsons, dash pattern included,
+// rather than a bespoke approximation.
+const BOUNDARY_STATE_PAINT = {
+  dark: {
+    'line-color': {stops: [[4,'rgba(103,103,114,1)'],[5,'rgba(103,103,114,1)'],[6,'rgba(103,103,114,1)']]},
+    'line-width': {stops: [[4,0.5],[7,1],[8,1],[9,1.2]]},
+    'line-dasharray': {stops: [[6,[1,2,3]],[7,[1,2,3]]]}
+  },
+  light: {
+    'line-color': {stops: [[4,'#ead5d7'],[5,'#ead5d7'],[6,'#e1c5c7']]},
+    'line-width': {stops: [[4,0.5],[7,1],[8,1],[9,1.2]]},
+    'line-dasharray': {stops: [[6,[1]],[7,[2,2]]]}
+  }
+};
+
 function andorraCataloniaBorderToGeoJSON(){
   return {type:'Feature', geometry:{type:'LineString', coordinates: ANDORRA_CATALONIA_BORDER.map(([lat,lng])=>[lng,lat])}};
 }
@@ -130,10 +144,10 @@ function addAndorraCataloniaBorderLayer(beforeId){
   if(map.getLayer('andorra-catalonia-border-layer')) map.removeLayer('andorra-catalonia-border-layer');
   if(map.getSource('andorra-catalonia-border')) map.removeSource('andorra-catalonia-border');
   map.addSource('andorra-catalonia-border', {type:'geojson', data: andorraCataloniaBorderToGeoJSON()});
-  const style0 = getComputedStyle(document.documentElement);
+  const mode = document.documentElement.classList.contains('light') ? 'light' : 'dark';
   map.addLayer({
     id:'andorra-catalonia-border-layer', type:'line', source:'andorra-catalonia-border',
-    paint:{'line-color': style0.getPropertyValue('--sand').trim() || '#f1e4c8', 'line-width':0.8, 'line-opacity':0.45}
+    paint: BOUNDARY_STATE_PAINT[mode]
   }, beforeId);
 }
 
@@ -141,7 +155,7 @@ function addAndorraCataloniaBorderLayer(beforeId){
 // on initial load, but on a theme toggle that meant a visible flicker: setStyle()'s
 // diff (see the click handler below) already drops them, since none of them are part of
 // either CARTO style JSON, and re-adding a GeoJSON source kicks off async tessellation,
-// so there's a frame or two where the mask/outline/comarques/Andorra-border are all gone.
+// so there's a frame or two where the mask/outline/Andorra-border are all gone.
 //
 // To avoid that, the toggle handler calls this first: it lifts the *current* (live)
 // definitions of these layers/sources — unchanged except for the paint colors that
@@ -154,7 +168,6 @@ function addAndorraCataloniaBorderLayer(beforeId){
 // to addContourLayers().
 const REQUIRED_LAYER_IDS = ['contour-mask-layer','contour-outline-layer','andorra-catalonia-border-layer'];
 const REQUIRED_SOURCE_IDS = [maskSourceId, outlineSourceId, 'andorra-catalonia-border'];
-const COMARQUES_LAYER_ID = 'comarques-outline-layer'; // optional — only exists once the user has zoomed past COMARQUES_MIN_ZOOM at least once
 
 function preserveContourLayersAcrossStyleSwap(newStyle){
   const current = map.getStyle();
@@ -164,12 +177,12 @@ function preserveContourLayersAcrossStyleSwap(newStyle){
   const style0 = getComputedStyle(document.documentElement);
   const maskColor = style0.getPropertyValue('--mask').trim() || '#050d14';
   const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
-  const sandColor = style0.getPropertyValue('--sand').trim() || '#f1e4c8';
+  const mode = document.documentElement.classList.contains('light') ? 'light' : 'dark';
 
   const [maskLayer, outlineLayer, andorraLayer] = requiredLayers.map(l => ({...l, paint: {...l.paint}}));
   maskLayer.paint['fill-color'] = maskColor;
   maskLayer.paint['fill-opacity'] = maskOpacity;
-  andorraLayer.paint['line-color'] = sandColor;
+  Object.assign(andorraLayer.paint, BOUNDARY_STATE_PAINT[mode]);
 
   newStyle.sources = {...newStyle.sources};
   REQUIRED_SOURCE_IDS.forEach(id => { if(current.sources[id]) newStyle.sources[id] = current.sources[id]; });
@@ -184,66 +197,8 @@ function preserveContourLayersAcrossStyleSwap(newStyle){
   }
   insertBefore(maskLayer, maskBeforeId);
   insertBefore(outlineLayer, beforeId);
-
-  const comarquesLive = current.layers.find(l => l.id === COMARQUES_LAYER_ID);
-  if(comarquesLive){
-    const comarquesLayer = {...comarquesLive, paint: {...comarquesLive.paint, 'line-color': sandColor}};
-    newStyle.sources['comarques'] = current.sources['comarques'];
-    insertBefore(comarquesLayer, beforeId);
-  }
-
   insertBefore(andorraLayer, beforeId);
   return true;
-}
-
-const COMARQUES_MIN_ZOOM = 8;
-
-function comarquesToGeoJSON(data){
-  const features = [];
-  data.forEach(c=>{
-    c.r.forEach(ring=>{
-      features.push({type:'Feature', properties:{name:c.n}, geometry:{type:'LineString', coordinates: ring.map(([lat,lng])=>[lng,lat])}});
-    });
-  });
-  return {type:'FeatureCollection', features};
-}
-
-// Fetches comarques.json (276KB) the first time it's actually needed — i.e. the first
-// time the user zooms to COMARQUES_MIN_ZOOM — rather than on every page load
-// regardless of zoom. Guarded against concurrent calls (e.g. two zoomend events firing
-// before the first fetch resolves) with comarquesLoading.
-let comarquesLoading = false;
-
-async function addComarquesLayer(){
-  if(map.getLayer(COMARQUES_LAYER_ID) || comarquesLoading) return;
-  comarquesLoading = true;
-  try{
-    const data = await loadComarques();
-    if(map.getLayer(COMARQUES_LAYER_ID)) return; // added by another call while this one awaited
-    if(map.getSource('comarques')) map.removeSource('comarques');
-    map.addSource('comarques', {type:'geojson', data: comarquesToGeoJSON(data)});
-    const style0 = getComputedStyle(document.documentElement);
-    const { beforeId } = computeInsertionPoints(map.getStyle().layers);
-    map.addLayer({
-      id:COMARQUES_LAYER_ID, type:'line', source:'comarques',
-      paint:{'line-color': style0.getPropertyValue('--sand').trim() || '#f1e4c8', 'line-width':0.8, 'line-opacity':0.45},
-      layout:{'visibility': map.getZoom() >= COMARQUES_MIN_ZOOM ? 'visible' : 'none'}
-    }, beforeId);
-  } finally {
-    comarquesLoading = false;
-  }
-}
-
-function updateComarquesVisibility(){
-  if(map.getZoom() >= COMARQUES_MIN_ZOOM){
-    if(map.getLayer(COMARQUES_LAYER_ID)){
-      map.setLayoutProperty(COMARQUES_LAYER_ID, 'visibility', 'visible');
-    }else{
-      addComarquesLayer();
-    }
-  }else if(map.getLayer(COMARQUES_LAYER_ID)){
-    map.setLayoutProperty(COMARQUES_LAYER_ID, 'visibility', 'none');
-  }
 }
 
 function refreshContourColors(){
@@ -251,11 +206,11 @@ function refreshContourColors(){
   const style0 = getComputedStyle(document.documentElement);
   map.setPaintProperty('contour-mask-layer', 'fill-color', style0.getPropertyValue('--mask').trim());
   map.setPaintProperty('contour-mask-layer', 'fill-opacity', parseFloat(style0.getPropertyValue('--mask-opacity')));
-  if(map.getLayer(COMARQUES_LAYER_ID)){
-    map.setPaintProperty(COMARQUES_LAYER_ID, 'line-color', style0.getPropertyValue('--sand').trim());
-  }
   if(map.getLayer('andorra-catalonia-border-layer')){
-    map.setPaintProperty('andorra-catalonia-border-layer', 'line-color', style0.getPropertyValue('--sand').trim());
+    const mode = document.documentElement.classList.contains('light') ? 'light' : 'dark';
+    Object.entries(BOUNDARY_STATE_PAINT[mode]).forEach(([prop, value])=>{
+      map.setPaintProperty('andorra-catalonia-border-layer', prop, value);
+    });
   }
 }
 
@@ -460,7 +415,6 @@ async function initMap(){
     addAllMarkers();
   });
   map.on('zoomend', updateContour);
-  map.on('zoomend', updateComarquesVisibility);
 
   let themeSwitching = false;
   document.getElementById('theme-toggle').addEventListener('click', async ()=>{
