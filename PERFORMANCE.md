@@ -508,6 +508,68 @@ viable lever to pull (TBT/CPU-cost breakdown, camera-markers cost, unused
 MapLibre bundle, bare MapLibre+CARTO's own rendering cost). Overall this
 audit: score 49 → 65, LCP 4.4s → 1.3s.
 
+## Follow-up audit #3 — 2026-09-03, later still: PageSpeed Insights findings
+
+Two findings surfaced via PageSpeed Insights (desktop and mobile tabs) that
+none of the mobile-only Lighthouse CLI testing above had caught.
+
+### Fixed: CLS on desktop viewports (>1024px)
+
+The 2026-09-02 CLS fix (`header{min-height:120px}`) only applied below
+1024px, on the assumption that above that width the header stays single-line
+and therefore doesn't shift. PSI's desktop report showed CLS 0.132–0.189,
+attributed almost entirely to `#mapwrap` (the grid row below `header`)
+shifting, with no font-swap cause given.
+
+Reproduced directly: desktop Lighthouse (1920×1080, devtools-throttled) gave
+CLS 0.132, with `#mapwrap` scoring 0.1318 of it. Measured the actual header
+height through page load on that viewport: **79.4px → 69 → 61.5 → 63.5px**,
+never stable, despite staying single-line the whole time — the row was
+shrinking as the legend populated and the web fonts swapped in, not wrapping.
+
+Fix: `@media (min-width:1025px){ header{min-height:84px;} }` (`styles.css`,
+sibling to the existing ≤1024px rule) — reserves the taller pre-settle
+height. Verified: header height now flat at 84px through the entire load
+(no oscillation at any point), CLS **0.132 → 0.001**, no visual regression
+(screenshot comparison), no console errors.
+
+### Fixed (experimentally verified): redundant fonts.googleapis.com preconnect
+
+PSI's network-dependency-tree insight warned of 5 preconnect origins found
+(over its "use ≤4, sparingly" guidance), listing `fonts.googleapis.com`
+*twice* — once as our own `<link rel="preconnect">` tag, once as an
+HTTP-Link-header-style entry attributed to the same origin.
+
+Investigated at the network level (CDP `Network.responseReceivedExtraInfo`
+across a full page load, the same layer Lighthouse itself inspects) before
+touching anything: found exactly one real `Link` header anywhere in the
+traffic, and it targets `fonts.gstatic.com` (Google's own standard
+preconnect hint on its font CSS response, pointing at the actual font-file
+host) — not `fonts.googleapis.com`. No second real header targeting
+`fonts.googleapis.com` exists anywhere in the network traffic. Our own
+markup has exactly one `<link rel="preconnect" href="https://fonts.googleapis.com">`
+tag. Conclusion: the insight was very likely double-counting that single tag
+under two internal representations, not reporting two real hints.
+
+Tested by removing our tag (`index.html`) and re-running Lighthouse against
+production:
+
+| Signal | With tag | Without tag |
+|---|---|---|
+| Preconnected origins listed | `fonts.googleapis.com` + 3 others (the origin appeared twice within that) | 3 origins — `fonts.googleapis.com` gone entirely, "no additional origins are good candidates" |
+| Performance score | 65 | 65 |
+| FCP / LCP | 1.3s / 1.3s | 1.3s / 1.3s |
+| CLS | 0.003 | 0.003 |
+| `fonts.googleapis.com` CSS request start | 673ms | 653ms (not delayed) |
+| Same request's duration | 590ms | 664ms (+74ms, single-sample, within normal run-to-run noise) |
+
+Removing the tag made both the real entry and the duplicate vanish together,
+confirming the double-count theory, and cost nothing on any headline metric.
+The one ~74ms signal on the font request's own duration didn't propagate
+anywhere — `display:swap` (fixed earlier this audit) already decouples
+font-arrival timing from LCP/FCP, so there's nothing downstream for that
+small delta to affect. Kept the removal.
+
 ## How to re-run this audit
 
 Against the live site (preferred — matches real CDN latency):
