@@ -172,14 +172,170 @@ This splits the remaining TBT into three roughly-quantified sources:
   entirely the *additional MapLibre-internal rendering work* they trigger, not
   slow JS of our own.
 
+## Follow-up audit #2 — 2026-09-03 (production URL, post-bundling)
+
+First run against the real deployed site (`https://finestres-obertes.pages.dev/`)
+rather than a local server — prod didn't exist yet for the previous two audits.
+Also the first audit since MapLibre was bundled via esbuild instead of
+CDN-loaded (see git history), so this re-checks whether that changed anything
+here.
+
+Lighthouse 13.4.1, mobile. Two throttling methods were used and should not be
+compared to each other directly:
+
+- **simulate** (Lighthouse's default, matches prior audits' methodology): 1 run.
+- **devtools** (real network/CPU throttling applied during navigation, not a
+  post-hoc model): 3 runs, median reported. Used for the diagnostic
+  drill-down below because its per-resource timestamps and the headline
+  metric are self-consistent — under `simulate`, `lcp-breakdown-insight`'s
+  subpart durations (TTFB + render delay) summed to ~650ms while the
+  headline LCP reported 5.2s, which doesn't reconcile.
+
+### Evidence
+
+| Signal | simulate (1 run) | devtools (median of 3, range) | Source |
+|---|---|---|---|
+| Performance score | 49/100 | 49/100 (48–50) | Lighthouse |
+| LCP | 5.2s (score 0.23) | 4.4s (score —, range 4.3–4.5s) | Lighthouse |
+| Total Blocking Time | 5,320ms (score 0) | 1,830ms (range 1,630–1,920ms) — still "poor" (>600ms) | Lighthouse |
+| CLS | 0.012 (score 1.0) | 0.012 | Lighthouse |
+| Speed Index | 3.8s | 9.0s (range 9.0–9.2s) | Lighthouse |
+| Interactive (TTI) | 10.5s | 11.9s (range 11.8–12.1s) | Lighthouse |
+| Total page weight | 1,154 KiB | — | Lighthouse |
+
+Compared to the 2026-09-02 follow-up's local-server `simulate` numbers
+(score 49, LCP 5.2s, TBT 4,200ms), today's `simulate` score/LCP land in the
+same place; TBT looks worse (5,320ms vs 4,200ms) but that's very likely a
+localhost-vs-real-CDN-latency artifact of the `simulate` model rather than a
+real regression — see the `devtools` column, which is a genuine navigation
+under real throttling and shows TBT considerably *lower* (1,830ms). No
+apples-to-apples comparison exists yet for `devtools`-method TBT since prior
+audits didn't use it.
+
+### New findings (not seen in prior audits — both local-server-only, no live fonts/CDN in the critical path the same way)
+
+- **[Performance/LCP] `font-display: block` on the page's own LCP element.**
+  File: `index.html:25` (Google Fonts `<link>`, `&display=block`); the LCP
+  element is the `<h1>` (`font-family:'Fraunces'`, `styles.css:25`).
+  - **Impact:** Root cause of nearly all remaining LCP time. `lcp-breakdown-insight`
+    (devtools run): TTFB 79ms, **element render delay 4,334ms** — the H1 is
+    invisible until Fraunces loads because `display=block` withholds fallback
+    text during the font block period. Confirmed via `network-requests`
+    timestamps: the Fraunces `.woff2` doesn't even *start* downloading until
+    ~3.0s in (queued behind `app.js`, MapLibre's worker/shared chunks, and the
+    CARTO tile/style fetches all competing for the connection), finishes at
+    3.95s, and LCP fires at 4.41s — right after. `font-display-insight`
+    independently flags this: score 0, "est. savings of 950ms" for Fraunces
+    (790ms for Space Grotesk too, non-LCP but same root cause).
+  - **Evidence:** measured (`lcp-breakdown-insight`, `font-display-insight`,
+    raw `network-requests` timestamps, devtools-throttled run).
+  - **Fix:** change `&display=block` to `&display=swap` in the Google Fonts
+    URL (`index.html:25`, both the `<link>` and its `<noscript>` fallback).
+    Trades a brief font-swap flash (already how most of the web handles this)
+    for the H1 painting immediately in its fallback (`serif`) — should
+    decouple LCP from font-load time entirely. Lowest-risk, highest-confidence
+    fix in this audit.
+
+- **[Performance] Render-blocking CSS.** `maplibre-gl.css` and `styles.css`
+  are both plain blocking `<link rel="stylesheet">` tags.
+  - **Impact:** `render-blocking-insight`: score 0, est. 721ms
+    (`maplibre-gl.css`, 10.2KB) + 1,071ms (`styles.css`, 1.9KB) — note these
+    are Lighthouse's per-resource estimates and likely overlap rather than
+    strictly add.
+  - **Evidence:** measured (`render-blocking-insight`).
+  - **Fix:** consider the same `media="print" onload="this.media='all'"`
+    async pattern already used for the Google Fonts `<link>` at
+    `index.html:25`. Risk: `maplibre-gl.css` positions map controls/popups —
+    deferring it could cause a brief flash of unstyled controls, needs visual
+    testing before/after. `styles.css` is small and used for layout (`#app`
+    grid, the CLS fix from 2026-09-02) — deferring it risks reintroducing the
+    CLS that fix solved; test carefully or leave it blocking.
+
+- **[Performance] 4-level-deep serial network dependency chain drags out
+  Speed Index/TTI.** `network-dependency-tree-insight` (devtools run):
+  `index.html` → `app.js` (finishes 2.8s: must fully execute before MapLibre
+  can even request anything) → CARTO `style.json` (3.6s) → glyph PBFs, only
+  discoverable from `style.json`'s own content (finish at **9.6s and
+  11.4s**). This chain is very likely why Speed Index (9.0s) and TTI
+  (11.9s) are both much worse than LCP (4.4s) suggests.
+  - **Evidence:** measured (`network-dependency-tree-insight`).
+  - **Fix (partial — shortens the chain by one hop, not all of it):** the
+    `style.json` URL is one of exactly two static strings picked by theme
+    (`carto-style.js:242-245`), and theme is already resolved synchronously
+    before paint by the inline script at the top of `index.html`. That same
+    script could inject a `<link rel="preload" as="fetch" crossorigin
+    href="[the theme-appropriate style.json URL]">`, letting the browser
+    start fetching it in parallel with `app.js` instead of waiting ~2.8s for
+    `app.js` to execute first. The glyph PBFs after it are still only
+    discoverable from `style.json`'s own content, so this doesn't collapse
+    the whole chain — but pulling the first hop forward by ~2s should still
+    meaningfully pull the rest forward with it. Not yet tried or measured.
+
+### Not re-verified this round
+
+- **The 2026-09-02 TBT root-cause breakdown** (bare MapLibre+CARTO ~52%, our
+  contour/labels ~20%, our camera markers ~28%, via CPU-profile A/B testing)
+  was not re-run. Bundling changes *how* MapLibre's JS is delivered, not
+  what it does at runtime, so this breakdown is expected to still hold — but
+  that's an assumption, not a re-measurement. TBT under real (`devtools`)
+  throttling is 1,830ms median, still solidly in Lighthouse's "poor" band
+  (>600ms) despite the chunking (`yieldToMain`) and CARTO-trimming fixes
+  from the last audit already having shipped — worth a fresh CPU profile to
+  see whether trimming CARTO's style already reduced the "bare MapLibre"
+  share, and whether chunking is actually keeping individual tasks under
+  50ms in production (`long-tasks` in this run still shows a 438ms task
+  attributed to `app.js`).
+- **The bundled MapLibre JS is 51% unused** (`unused-javascript`: 134.4KiB of
+  265.1KiB `app.js` never executes in this session). Plausibly inherent to
+  bundling a general-purpose GL library rather than something fixable with a
+  simple change — not investigated further this round.
+
+## To-do (priority order)
+
+1. **`display=block` → `display=swap`** on the Google Fonts `<link>`
+   (`index.html:25`, both the real tag and its `<noscript>` twin). Highest
+   confidence, lowest risk, largest expected single win (~4s off LCP).
+2. **Preload the theme-appropriate CARTO `style.json`** from the inline
+   theme script in `index.html`, using `<link rel="preload" as="fetch"
+   crossorigin>`, to start that fetch in parallel with `app.js` instead of
+   after it.
+3. **Re-run this audit (3× devtools-throttled, median) after 1–2** to get
+   real before/after numbers rather than estimates.
+4. **Try deferring `maplibre-gl.css`** with the same async-CSS pattern as
+   the fonts; visually verify no control/popup flash before keeping it.
+   Leave `styles.css` blocking unless testing proves the CLS fix survives
+   deferring it too.
+5. **Re-run the CPU-profile TBT breakdown** (bare MapLibre+CARTO vs. our
+   layers vs. our markers, as done 2026-09-02) to confirm the ~52/20/28
+   split still holds after CARTO-trimming and bundling, and check whether
+   `yieldToMain()` chunking is actually keeping tasks under 50ms in
+   production (a 438ms task was observed this round).
+6. **Investigate the 51%-unused MapLibre bundle** only if 1–5 don't get TBT/
+   bundle-size where you want them — lower confidence this has an easy fix,
+   higher effort to investigate (would need to check which MapLibre features
+   `app.js` actually exercises vs. what esbuild's tree-shaking is keeping).
+
 ## How to re-run this audit
 
+Against the live site (preferred — matches real CDN latency):
 ```
-python3 -m http.server 8420   # from the repo root
-npx lighthouse http://localhost:8420 \
+CHROME_PATH=/usr/bin/google-chrome-stable npx lighthouse https://finestres-obertes.pages.dev/ \
+  --only-categories=performance --preset=perf --form-factor=mobile --screenEmulation.mobile \
+  --throttling-method=devtools \
   --output=json --output-path=./lh-report.json \
-  --chrome-flags="--headless=new --no-sandbox" \
-  --only-categories=performance
+  --chrome-flags="--headless=new --no-sandbox"
+```
+Run at least 3× and report the median — single runs vary by several hundred
+ms on TBT/LCP. `--throttling-method=devtools` gives self-consistent headline
+metrics and per-resource insight timings (see note above); the historical
+audits above used the `simulate` default instead, so a same-method
+comparison isn't possible against them.
+
+Against a local build instead (no real CDN latency, but works without a
+deployed URL):
+```
+npm run build && npm run serve:dist   # serves dist/ on :8420
+npx lighthouse http://localhost:8420 --only-categories=performance ...
 ```
 
 The `performance`, `core-web-vitals`, and `web-quality-audit` project skills
