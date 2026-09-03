@@ -12,6 +12,23 @@ import { SITE_CONFIG } from './site-config.js';
 // js/layers/cameras/index.js — add a new layer by adding its module here.
 const LAYERS = [camerasLayer];
 
+// Lighthouse's Total Blocking Time only counts the part of a task PAST 50ms — a single
+// 500ms task contributes 450ms of TBT, but the same 500ms split into six ~83ms chunks
+// (with a yield between each) contributes only 6*(83-50)=198ms, for identical total
+// work. addContourLayers()/addRegionLabels()/addAllMarkers() each addSource/addLayer
+// several times, and per a CPU profile taken during a performance audit, most of the
+// actual time is spent inside MapLibre's own style-recalculation/tile-evaluation code
+// that those calls trigger, not in this file's own functions — so splitting *between*
+// these calls, not inside them, is what actually creates yield points in the right
+// place. scheduler.yield() (Chrome 129+) is preferred when available since it's
+// prioritized to run before other queued work the same way a continuation would;
+// setTimeout(0) is a normal (de-prioritized, throttled-when-backgrounded) macrotask
+// but still creates the task boundary that's actually needed here.
+function yieldToMain(){
+  if(typeof scheduler !== 'undefined' && scheduler.yield) return scheduler.yield();
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 let map, maskSourceId = 'contour-mask', outlineSourceId = 'contour-outline';
 
 // The mask's outer ring only needs to reach past whatever the map can ever actually
@@ -549,7 +566,9 @@ async function initMap(){
     // pop in once their (already in-flight) data finishes loading, rather than
     // blocking the map on either fetch.
     await Promise.all([addContourLayers(contourRingsLoaded), layersLoaded]);
+    await yieldToMain();
     addRegionLabels();
+    await yieldToMain();
     addAllMarkers();
   });
   map.on('zoomend', updateContour);
@@ -583,11 +602,13 @@ async function initMap(){
       await addContourLayers();
       refreshContourColors();
     }
+    await yieldToMain();
     if(!labelsPreserved){
       // Same situation as above, for Illes Balears/l'Alguer — nothing existed yet to
       // lift into the new style, so just add them fresh.
       addRegionLabels();
     }
+    await yieldToMain();
     if(!clustersPreserved){
       // Same situation as above, for camera clusters — nothing existed yet to lift
       // into the new style, so just add them fresh (from the already-loaded items,
