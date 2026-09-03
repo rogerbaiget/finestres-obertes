@@ -6,6 +6,25 @@
 (function(){
   var t = localStorage.getItem('theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   if(t==='light') document.documentElement.classList.add('light');
+
+  // Preload the CARTO basemap style.json matching this theme, in parallel with
+  // app.js downloading. app.js can't request it until the whole bundle has
+  // downloaded, parsed, and started executing (~2.8s, per PERFORMANCE.md) —
+  // without this hint the browser doesn't even start that fetch until then.
+  // Runs as the very first thing in <head> so the browser discovers it before
+  // any other request on the page. URLs duplicated from carto-style.js's
+  // loadCartoStyle() rather than imported: this script must stay a plain
+  // synchronous inline script, running before any module script, to apply the
+  // theme class before first paint.
+  var styleUrl = t === 'light'
+    ? 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+    : 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+  var preload = document.createElement('link');
+  preload.rel = 'preload';
+  preload.as = 'fetch';
+  preload.crossOrigin = 'anonymous';
+  preload.href = styleUrl;
+  document.head.appendChild(preload);
 })();
 </script>
 <meta charset="UTF-8">
