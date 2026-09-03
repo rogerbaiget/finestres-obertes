@@ -47,7 +47,15 @@ jobs:
 
       # wrangler-action, unlike cloudflare/pages-action before it, doesn't write a
       # job summary on its own — reconstruct the same panel from its own outputs.
+      # Also surfaces any warning/error lines from the deploy command itself (its
+      # command-output/command-stderr outputs), rather than requiring a dig through
+      # the raw step log to notice something like the 5-minute Wrangler
+      # fallback-install stall that motivated adding this section.
       - name: Deploy summary
+        if: always()
+        env:
+          COMMAND_OUTPUT: ${{ steps.deploy.outputs.command-output }}
+          COMMAND_STDERR: ${{ steps.deploy.outputs.command-stderr }}
         run: |
           {
             echo "# Deploying with Cloudflare Pages"
@@ -56,4 +64,15 @@ jobs:
             echo "| --- | --- |"
             echo "| **Deployment URL** | ${{ steps.deploy.outputs.deployment-url }} |"
             echo "| **Alias URL** | ${{ steps.deploy.outputs.pages-deployment-alias-url }} |"
+            echo
+            echo "## Warnings / errors"
+            echo
+            findings="$(printf '%s\n%s\n' "$COMMAND_OUTPUT" "$COMMAND_STDERR" | grep -iE 'warn|error' || true)"
+            if [ -n "$findings" ]; then
+              echo '```'
+              echo "$findings"
+              echo '```'
+            else
+              echo "None."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
