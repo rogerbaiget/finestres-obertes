@@ -52,8 +52,9 @@ async function copyStaticAssets() {
   // Without a real file here, Cloudflare Pages' SPA-style fallback serves index.html
   // for the unmatched /robots.txt request instead of 404ing — Search Console then
   // tries to parse that HTML as robots.txt syntax and (correctly) rejects nearly
-  // every line of it as invalid.
+  // every line of it as invalid. Same problem, same fix, for llms.txt below.
   await copyFile('src/robots.txt', `${OUT}/robots.txt`);
+  await copyFile('src/llms.txt', `${OUT}/llms.txt`);
 
   // Runtime-fetched JSON: contours.js reaches these via a relative fetch()
   // string, not an import, so esbuild's bundler never sees them — copy verbatim.
