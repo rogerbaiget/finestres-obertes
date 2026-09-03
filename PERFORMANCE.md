@@ -96,6 +96,82 @@ guessed from source alone:
 4. Revisit marker-creation cost and JS minification only if the score still
    isn't where you want it after 1–2.
 
+## Follow-up audit — 2026-09-03
+
+Lighthouse 13 (mobile, default throttling: 4x CPU, ~1.6Mbps), same methodology
+as above, re-run after fixing `checkPhoto()` and reserving header space (both
+recommended above), plus a session's worth of unrelated map-rendering work
+(region labels, contour mask/outline, marker z-order).
+
+### Evidence
+
+| Signal | 2026-09-02 | 2026-09-03 | Change |
+|---|---|---|---|
+| Performance score | 21/100 | **49/100** | +28 |
+| LCP | 10.0s (score 0) | 5.2s (score 0.23) | −4.8s |
+| Total Blocking Time | 4,990ms (score 0) | 4,200ms (score 0.01) | −790ms — still critical |
+| CLS | 0.335 (score 0.34) | **0.012 (score 1.0)** | fixed |
+| Total page weight | 16.3 MB | **1.02 MB** | −15.3MB (~16x) |
+| FCP | not reported | 1.8s (score 0.89) | — |
+| TTI | 10.0s (capped) | 6.7s (score 0.56) | −3.3s |
+
+The two fixes recommended in the previous audit worked exactly as predicted:
+page weight dropped ~16x (the `checkPhoto()` fix) and CLS is now essentially
+perfect (the header space reservation). LCP and TTI improved substantially as
+a side effect of the same two fixes (no longer network-starved).
+
+### Total Blocking Time — measured, not guessed
+
+TBT barely moved and is now the single worst-scoring metric (0.01/1.0).
+Diagnosed with a CDP CPU profile (4x throttle, 8s post-load window,
+`Profiler.start`/`stop`) rather than source inspection alone:
+
+- Of ~2.6s of actual (non-idle) CPU time sampled, essentially all
+  attributable self-time is *inside* `maplibre-gl.min.js` itself
+  (`renderLayer`, `_render`, `possiblyEvaluate`, `_setupPainter`, symbol/label
+  placement, matrix calculations) — none of it in `map.js` or
+  `carto-style.js` directly.
+- Confirmed with a patch/measure/revert A/B test (three Lighthouse runs, each
+  reverted after): stripping out our own additions (contour mask/outline,
+  region labels, 90 camera markers) and loading *only* the raw CARTO style
+  drops TBT from 4,200ms to **2,170ms**. Adding back the contour
+  mask/outline/region labels brings it to **3,010ms** (+840ms). Adding back
+  the 90 camera markers (2 clustered GeoJSON layers) brings it to the full
+  **4,200ms** (+1,190ms).
+
+This splits the remaining TBT into three roughly-quantified sources:
+
+| Source | Contribution | Nature |
+|---|---|---|
+| Bare MapLibre GL + CARTO's full base style | ~2,170ms (52%) | Inherent to rendering a full general-purpose basemap (positron/dark-matter ship dozens of layers — roads, buildings, POIs, admin boundaries — most irrelevant to this site) under mobile 4x CPU throttle |
+| Our contour mask/outline + region labels | ~840ms (20%) | Extra symbol/fill layers MapLibre must evaluate and place |
+| Our 90 camera markers (clustered layers) | ~1,190ms (28%) | Confirms the 2026-09-02 "medium priority" hypothesis — not DOM/Marker creation (markers are already GPU-drawn clustered layers, 0 DOM nodes), but the added paint/layout expression evaluation and symbol-collision placement work this triggers inside MapLibre |
+
+### Recommended priority (updated)
+
+1. **Chunk our own layer/marker setup across multiple frames** (e.g. yield
+   between `addContourLayers()`, `addRegionLabels()`, `addAllMarkers()` via a
+   `requestAnimationFrame`/`setTimeout(0)` gap, or `scheduler.yield()` where
+   supported). TBT specifically penalizes any *single* task over 50ms — several
+   of today's long-tasks were 300–900ms. Splitting them into sub-50ms chunks
+   can cut TBT substantially without reducing total CPU work or changing
+   anything visible. Lowest risk, not yet tried.
+2. **Trim CARTO's base style to only the layers this site actually uses**
+   (land/water, the few road/label layers still visible, drop the rest) rather
+   than shipping the full general-purpose positron/dark-matter style. This is
+   the larger of the two remaining costs (~52% of TBT) but a bigger, riskier
+   change — it touches every layer CARTO ships and needs care not to silently
+   break something `carto-style.js` already depends on by name (e.g.
+   `place_state`, `water-sea`).
+3. Re-run this same before/after methodology after either fix.
+
+### Ruled out (this round)
+
+- **Our own marker/label/mask code being independently slow** — the CPU
+  profile shows no hot functions in `map.js`/`carto-style.js`; their cost is
+  entirely the *additional MapLibre-internal rendering work* they trigger, not
+  slow JS of our own.
+
 ## How to re-run this audit
 
 ```
