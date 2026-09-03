@@ -136,33 +136,46 @@ async function addContourLayers(ringsPromise = pickContour(map.getZoom())){
 
   const { maskBeforeId, beforeId } = computeInsertionPoints(map.getStyle().layers);
 
-  // maxzoom:4 caps MapLibre's OWN internal re-tiling of these GeoJSON sources
-  // (separate from, and in addition to, the zoom-tiered detail we already swap in via
-  // updateContour()'s setData calls): every reachable map zoom (minZoom is 5) then
-  // overzooms the same z4 tile(s) instead of crossing into freshly-generated ones —
-  // left at the default (18), crossing an integer zoom made MapLibre swap tiles, and
-  // for a moment before the new one was ready the previous one was just gone (the
-  // mask, a single polygon covering everywhere outside the Catalan Countries, visibly
+  // maxzoom caps MapLibre's OWN internal re-tiling of these GeoJSON sources (separate
+  // from, and in addition to, the zoom-tiered detail we already swap in via
+  // updateContour()'s setData calls): every zoom past it then overzooms the same
+  // already-generated tile(s) instead of crossing into freshly-generated ones — left
+  // at the default (18), crossing an integer zoom made MapLibre swap tiles, and for a
+  // moment before the new one was ready the previous one was just gone (the mask, a
+  // single polygon covering everywhere outside the Catalan Countries, visibly
   // disappearing mid-zoom), confirmed via a fast zoom sequence with settle-waits
   // removed. maxzoom alone wasn't enough, though: our region straddles longitude 0, so
   // it always spans (at least) two horizontally-adjacent tiles at any zoom above 0 —
   // panning during an aggressive zoom could still bring one of those into view for the
   // first time, causing one more single-frame gap, confirmed with an automated check
   // that queries a known-outside-contour point at every step of a fast zoom-in/out
-  // sequence and verifies the mask actually covers it whenever it's on-screen. A much
-  // larger buffer (default 128, out of 4096 units) closed that last gap by having each
-  // tile already render well past its own edge, into its neighbour's territory, so the
-  // neighbour isn't needed the instant it's approached. Going all the way to maxzoom:0
-  // (exactly one tile, globally, so there's no second tile to ever swap to at all) was
-  // tried first and also closed every gap, but visibly degraded the coastline to
-  // blocky straight segments — geojson-vt quantizes each tile's internal coordinates
-  // to a fixed 4096-unit grid regardless of how much detail the source geometry has,
-  // and at zoom 0 that grid covers the whole world (~10km per unit). maxzoom:4 with a
-  // larger buffer gets both properties at once, confirmed directly: zero gaps across
-  // the same aggressive sequence, and the coastline still crisp zoomed in tight.
-  map.addSource(maskSourceId, {type:'geojson', data: geo.mask, maxzoom: 4, buffer: 512});
+  // sequence and verifies the mask actually covers it whenever it's on-screen. A
+  // larger buffer (default 128, out of 4096 units) helps some (each tile already
+  // renders past its own edge, into its neighbour's territory) but doesn't close it
+  // completely and going much past 512 makes it measurably worse (more duplicated
+  // geometry per tile slows each one's own worker-side generation, widening the exact
+  // race it's meant to shrink) — a residual single-frame gap remains achievable with
+  // an adversarially fast synthetic zoom sequence, not reproduced at realistic
+  // interaction speeds.
+  //
+  // A too-low maxzoom has a second, separate cost, though: it also caps geojson-vt's
+  // simplification tolerance to whatever's "good enough" at that zoom's own scale —
+  // maxzoom:4's tolerance is roughly 3.7km, throwing away everything finer no matter
+  // how detailed updateContour()'s own 'max' tier data (up to ~19,000 points) actually
+  // is, and overzooming further only scales up that already-coarsened line. maxzoom:0
+  // (the most aggressive anti-flicker setting — exactly one tile, globally) makes this
+  // worst: geojson-vt quantizes each tile's internal coordinates to a fixed 4096-unit
+  // grid regardless of source detail, and at zoom 0 that grid covers the whole world
+  // (~10km per unit) — visibly blocky, confirmed directly. Raising it enough to keep
+  // real detail (11, matching pickContour()'s own threshold for the finest tier) fixes
+  // that — but mask and outline MUST use the same value: they're built from the same
+  // rings (see contourToGeoJSON below), so a mismatched maxzoom between them
+  // tessellates the same coordinates at two different tolerances, and the two edges
+  // visibly stop lining up at high zoom — confirmed directly (and reported) after a
+  // first attempt tried raising only the outline's.
+  map.addSource(maskSourceId, {type:'geojson', data: geo.mask, maxzoom: 11, buffer: 512});
   map.addLayer({id:'contour-mask-layer', type:'fill', source:maskSourceId, paint:{'fill-color':maskColor, 'fill-opacity':maskOpacity}}, maskBeforeId);
-  map.addSource(outlineSourceId, {type:'geojson', data: geo.outline, maxzoom: 4, buffer: 512});
+  map.addSource(outlineSourceId, {type:'geojson', data: geo.outline, maxzoom: 11, buffer: 512});
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 
   addAndorraCataloniaBorderLayer(beforeId);
