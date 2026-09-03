@@ -31,7 +31,7 @@ export const CONTOUR_LOCAL_VERY_LOW = [[[39.45511,-1.53249],[39.43009,-1.52347],
 
 const cache = new Map();
 function loadLevel(name){
-  if(!cache.has(name)) cache.set(name, fetch(`js/data/contours/${name}.json`).then(r => r.json()));
+  if(!cache.has(name)) cache.set(name, fetch(`data/contours/${name}.json`).then(r => r.json()));
   return cache.get(name);
 }
 

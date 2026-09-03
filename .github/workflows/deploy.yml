@@ -1,0 +1,38 @@
+name: Deploy to Cloudflare Pages
+
+# Matches this project's existing deploy convention: main is pushed freely,
+# and prod is fast-forwarded to it as the deliberate "go to production" step.
+# The Cloudflare Pages project must be in *direct upload* mode for this to be
+# the only thing publishing — its own git-integration build would otherwise
+# also try (and fail, since it doesn't know about `npm run build`) on every
+# push, racing this workflow.
+on:
+  push:
+    branches: [prod]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Must match the actual Cloudflare Pages project name exactly —
+          # confirm this in the Cloudflare dashboard before the first run.
+          projectName: finestres-obertes
+          directory: dist

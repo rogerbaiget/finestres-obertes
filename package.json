@@ -1,0 +1,13 @@
+{
+  "name": "finestres-obertes",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "python3 -m http.server 8420 --directory src",
+    "serve:dist": "python3 -m http.server 8420 --directory dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
