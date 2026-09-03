@@ -290,27 +290,46 @@ audits didn't use it.
   bundling a general-purpose GL library rather than something fixable with a
   simple change — not investigated further this round.
 
+### Verified fix — 2026-09-03, same day, after shipping items 1 and the title/heading change
+
+Item 1 (`display=swap`) shipped, plus an additional fix found in the same
+session: the `<h1>` (the LCP element itself) was empty in the HTML and only
+got its text from JS (`applySiteConfig()`, gated behind all of `app.js`
+downloading/parsing/executing, ~2.8s) — moved to static HTML directly,
+`site-config.js` removed. Re-ran the audit against production, 3×
+devtools-throttled, median:
+
+| Signal | Before (median of 3) | After (median of 3) | Change |
+|---|---|---|---|
+| Performance score | 49 | **64** | +15 |
+| LCP | 4.4s | **1.4s** | −3.0s |
+| FCP | 1.3s | 1.4s | ~flat |
+| CLS | 0.012 | 0.003 | slightly better |
+| Total Blocking Time | 1,830ms | 1,650ms | ~flat, still "poor" |
+| Speed Index | 9.0s | 9.3s | ~flat |
+| Interactive (TTI) | 11.9s | 12.1s | ~flat |
+
+LCP and score moved almost exactly as predicted; TBT/Speed Index/TTI stayed
+flat, also as expected — those are downstream of the still-open network-chain
+(to-do #1 below) and TBT (#3) items, neither of which this round touched.
+
 ## To-do (priority order)
 
-1. **`display=block` → `display=swap`** on the Google Fonts `<link>`
-   (`index.html:25`, both the real tag and its `<noscript>` twin). Highest
-   confidence, lowest risk, largest expected single win (~4s off LCP).
-2. **Preload the theme-appropriate CARTO `style.json`** from the inline
+1. **Preload the theme-appropriate CARTO `style.json`** from the inline
    theme script in `index.html`, using `<link rel="preload" as="fetch"
    crossorigin>`, to start that fetch in parallel with `app.js` instead of
-   after it.
-3. **Re-run this audit (3× devtools-throttled, median) after 1–2** to get
-   real before/after numbers rather than estimates.
-4. **Try deferring `maplibre-gl.css`** with the same async-CSS pattern as
+   after it. Expected to help Speed Index/TTI, which haven't moved yet.
+2. **Try deferring `maplibre-gl.css`** with the same async-CSS pattern as
    the fonts; visually verify no control/popup flash before keeping it.
    Leave `styles.css` blocking unless testing proves the CLS fix survives
    deferring it too.
-5. **Re-run the CPU-profile TBT breakdown** (bare MapLibre+CARTO vs. our
+3. **Re-run the CPU-profile TBT breakdown** (bare MapLibre+CARTO vs. our
    layers vs. our markers, as done 2026-09-02) to confirm the ~52/20/28
    split still holds after CARTO-trimming and bundling, and check whether
    `yieldToMain()` chunking is actually keeping tasks under 50ms in
-   production (a 438ms task was observed this round).
-6. **Investigate the 51%-unused MapLibre bundle** only if 1–5 don't get TBT/
+   production (a 438ms task was observed this round). TBT hasn't moved
+   (1,650ms, still "poor") despite everything shipped so far.
+4. **Investigate the 51%-unused MapLibre bundle** only if 1–3 don't get TBT/
    bundle-size where you want them — lower confidence this has an easy fix,
    higher effort to investigate (would need to check which MapLibre features
    `app.js` actually exercises vs. what esbuild's tree-shaking is keeping).
