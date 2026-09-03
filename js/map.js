@@ -214,13 +214,12 @@ function addAndorraCataloniaBorderLayer(beforeId){
 // data (excluded in carto-style.js, so this is its only label at any zoom). Both
 // drawn here instead, using REGION_LABEL_LAYOUT/REGION_LABEL_COLOR imported from
 // carto-style.js so they can't drift out of sync with place_state/place_country's own
-// (also-overridden-there) styling.
-const REGION_LABEL_IDS = ['illes-balears-label-layer', 'alguer-label-layer'];
-const REGION_SOURCE_IDS = ['illes-balears-label', 'alguer-label'];
-
-function extraRegionLabelGeoJSON(name, lng, lat){
-  return {type:'Feature', properties:{name}, geometry:{type:'Point', coordinates:[lng, lat]}};
-}
+// (also-overridden-there) styling. Both share one source/layer (a 2-feature
+// FeatureCollection) rather than one each, since their styling is already identical —
+// one less layer for MapLibre to set up and evaluate paint/layout expressions for on
+// every render.
+const REGION_LABEL_SOURCE_ID = 'region-labels';
+const REGION_LABEL_ID = 'region-labels-layer';
 
 // [name, lng, lat] for each custom label. l'Alguer's point is offset a little out to
 // sea, northwest of the city itself (8.3154, 40.5587) — centered exactly on it, our
@@ -231,22 +230,28 @@ const REGION_LABEL_POINTS = [
   ["l'Alguer", 8.05, 40.60]
 ];
 
+function regionLabelsGeoJSON(){
+  return {
+    type: 'FeatureCollection',
+    features: REGION_LABEL_POINTS.map(([name, lng, lat]) => (
+      {type:'Feature', properties:{name}, geometry:{type:'Point', coordinates:[lng, lat]}}
+    ))
+  };
+}
+
 function regionLabelPaint(mode){
   return {'text-color': REGION_LABEL_COLOR[mode], 'text-halo-color': REGION_LABEL_HALO[mode], 'text-halo-width': 0.8};
 }
 
 function addRegionLabels(){
-  REGION_LABEL_IDS.forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
-  REGION_SOURCE_IDS.forEach(id=>{ if(map.getSource(id)) map.removeSource(id); });
+  if(map.getLayer(REGION_LABEL_ID)) map.removeLayer(REGION_LABEL_ID);
+  if(map.getSource(REGION_LABEL_SOURCE_ID)) map.removeSource(REGION_LABEL_SOURCE_ID);
 
   const mode = document.documentElement.classList.contains('light') ? 'light' : 'dark';
-  const paint = regionLabelPaint(mode);
-  REGION_LABEL_POINTS.forEach(([name, lng, lat], i)=>{
-    map.addSource(REGION_SOURCE_IDS[i], {type:'geojson', data: extraRegionLabelGeoJSON(name, lng, lat)});
-    map.addLayer({
-      id: REGION_LABEL_IDS[i], type:'symbol', source: REGION_SOURCE_IDS[i],
-      layout: {...REGION_LABEL_LAYOUT, 'text-field': ['get','name']}, paint
-    });
+  map.addSource(REGION_LABEL_SOURCE_ID, {type:'geojson', data: regionLabelsGeoJSON()});
+  map.addLayer({
+    id: REGION_LABEL_ID, type:'symbol', source: REGION_LABEL_SOURCE_ID,
+    layout: {...REGION_LABEL_LAYOUT, 'text-field': ['get','name']}, paint: regionLabelPaint(mode)
   });
 }
 
@@ -262,13 +267,11 @@ function addRegionLabels(){
 // very first load), so the caller can fall back to a fresh addRegionLabels().
 function preserveRegionLabelsAcrossStyleSwap(newStyle, newMode){
   const current = map.getStyle();
-  const liveLayers = REGION_LABEL_IDS.map(id => current.layers.find(l => l.id === id));
-  if(liveLayers.some(l => !l)) return false;
+  const liveLayer = current.layers.find(l => l.id === REGION_LABEL_ID);
+  if(!liveLayer) return false;
 
-  const paint = regionLabelPaint(newMode);
-  newStyle.sources = {...newStyle.sources};
-  REGION_SOURCE_IDS.forEach(id => { if(current.sources[id]) newStyle.sources[id] = current.sources[id]; });
-  newStyle.layers = [...newStyle.layers, ...liveLayers.map(l => ({...l, paint}))];
+  newStyle.sources = {...newStyle.sources, [REGION_LABEL_SOURCE_ID]: current.sources[REGION_LABEL_SOURCE_ID]};
+  newStyle.layers = [...newStyle.layers, {...liveLayer, paint: regionLabelPaint(newMode)}];
   return true;
 }
 
