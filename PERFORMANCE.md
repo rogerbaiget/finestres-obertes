@@ -369,23 +369,86 @@ near that size), and TBT/Speed Index/TTI still untouched. Both remaining
 network/loading-side fixes from this audit are now shipped; what's left is
 squarely the `app.js` execution-cost side (to-do below).
 
+### CPU-profile TBT breakdown, re-run — 2026-09-03, later still
+
+Attempted with Lighthouse's TBT metric first, against a local production-equivalent
+build (`npm run build` + `npm run serve:dist`) — and found it **unusable as a
+local baseline**: TBT came back as 70-140ms despite `mainthread-work-breakdown`
+showing 1.3-3.4s of genuine Script Evaluation/Other work in the same trace.
+Cause, confirmed via the raw `long-tasks` audit: TTI got marked mid-load,
+around a lull at ~9.3-9.5s, with a further burst of long tasks continuing
+past it up to ~19.6s — since TBT only sums tasks strictly between FCP and
+TTI, everything after that mis-detected TTI point simply doesn't count. This
+is specific to this project's local-serving setup (a single-connection
+Python static server plus a live CDN for tiles/fonts/style produces a very
+different request-timing shape than a real CDN edge for the whole page), not
+a bug in the fixes shipped above — production TBT measurements earlier in
+this document aren't affected by it.
+
+Switched to the 2026-09-02 audit's own original methodology instead: a raw
+CDP CPU profile (`Profiler.start`/`stop`, 4x CPU throttle, 8-second
+post-load window), which doesn't depend on TTI detection at all. Also
+switched the patch/measure/revert A/B test's comparison metric from TBT to
+this same raw self-time sum. **One change from 2026-09-02's version of this
+methodology:** MapLibre is now bundled into `app.js` as a single file (it
+was a separate `maplibre-gl.min.js` URL before), so per-URL attribution can
+no longer separate "MapLibre-internal" from "our own code" — the earlier
+finding that essentially all self-time traces into MapLibre-internal
+functions couldn't be re-confirmed this way. The three-variant A/B
+comparison (which doesn't need that separation, only relative totals across
+variants with different amounts of our own code removed) still works.
+
+Three variants, 3 runs each (single-run noise turned out to be substantial —
+up to ~40% spread within a variant — so medians are used, and these numbers
+should be read as directional, not precise):
+
+| Variant | Runs (ms) | Median |
+|---|---|---|
+| Bare CARTO style only (no contour/labels/markers) | 720, 413, 704 | 704ms |
+| + contour mask/outline + region labels (no markers) | 658, 796, 1014 | 796ms |
+| + 90 camera markers (full site, current) | 1171, 1049, 997 | 1049ms |
+
+| Source | Contribution (of 1,049ms median full total) | 2026-09-02 (of 4,200ms TBT) |
+|---|---|---|
+| Bare MapLibre + CARTO | 704ms (67%) | ~2,170ms (52%) |
+| Our contour/labels | 92ms (9%) | ~840ms (20%) |
+| Our 90 camera markers | 253ms (24%) | ~1,190ms (28%) |
+
+The contour/labels share dropped sharply (20% → 9%) — consistent with the
+CARTO-trimming fix (shipped between the two audits) having worked
+specifically well for that cost, on top of shrinking the bare-style cost
+itself. Camera markers remain the second-largest contributor at a similar
+relative share (~24-28%) across both audits. Bare MapLibre+CARTO is still
+the largest single cost by a wide margin in both — consistent with the
+2026-09-02 conclusion that this is inherent to MapLibre's own rendering
+work, not something this project's own code controls.
+
+**No new fix identified.** The dominant remaining cost (bare MapLibre+CARTO
+rendering, ~700ms of actual CPU work under 4x throttle) doesn't have an
+obvious lever left to pull from this project's side — CARTO's style is
+already trimmed to this site's actual layers (2026-09-02), and the rest is
+MapLibre v6's own tile-evaluation/paint cost. The camera-markers cost
+(~253ms) is the one area with a plausible, bounded (~24% of total) further
+target, but no specific optimization was identified this round — would need
+its own profile drilling into what inside marker/cluster-layer setup is
+expensive (expression evaluation, symbol placement, clustering itself).
+
 ## To-do (priority order)
 
-1. **Re-run the CPU-profile TBT breakdown** (bare MapLibre+CARTO vs. our
-   layers vs. our markers, as done 2026-09-02) to confirm the ~52/20/28
-   split still holds after CARTO-trimming and bundling, and check whether
-   `yieldToMain()` chunking is actually keeping tasks under 50ms in
-   production (a 438ms task was observed earlier this round). TBT hasn't
-   moved (1,640ms, still "poor") through any fix shipped so far — and this
-   is now also the likely lever for Speed Index/TTI, not just TBT:
-   shrinking `app.js`'s own load-to-execute time would let MapLibre react
-   to the already-preloaded `style.json` sooner too. This is the one
-   remaining item with a plausible path to moving TBT/SI/TTI; the other
-   two below are lower-confidence.
+1. **Investigate the camera-markers CPU cost specifically** (~253ms median,
+   ~24% of total CPU work in the post-load window) — the one remaining cost
+   center with a plausible, bounded further target. Would need drilling into
+   `addClusteredLayer()`/`marker.js`'s paint/layout expressions or clustering
+   config, not yet attempted.
 2. **Investigate the 51%-unused MapLibre bundle** — lower confidence this
    has an easy fix, higher effort to investigate (would need to check which
    MapLibre features `app.js` actually exercises vs. what esbuild's
    tree-shaking is keeping).
+3. **No further action identified for bare MapLibre+CARTO's own rendering
+   cost** (the largest single share, ~67%) — inherent to MapLibre v6
+   rendering a real basemap at this throttle level, not something this
+   project's code controls further without either trimming CARTO's style
+   more aggressively than already done, or an upstream MapLibre improvement.
 
 ## How to re-run this audit
 
