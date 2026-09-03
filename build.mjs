@@ -49,6 +49,12 @@ async function copyStaticAssets() {
   await copyFile('node_modules/maplibre-gl/dist/maplibre-gl-shared.mjs', `${OUT}/js/maplibre-gl-shared.mjs`);
   await copyFile('node_modules/maplibre-gl/dist/maplibre-gl.css', `${OUT}/maplibre-gl.css`);
 
+  // Without a real file here, Cloudflare Pages' SPA-style fallback serves index.html
+  // for the unmatched /robots.txt request instead of 404ing — Search Console then
+  // tries to parse that HTML as robots.txt syntax and (correctly) rejects nearly
+  // every line of it as invalid.
+  await copyFile('src/robots.txt', `${OUT}/robots.txt`);
+
   // Runtime-fetched JSON: contours.js reaches these via a relative fetch()
   // string, not an import, so esbuild's bundler never sees them — copy verbatim.
   await cp('src/data/contours', `${OUT}/data/contours`, { recursive: true });
