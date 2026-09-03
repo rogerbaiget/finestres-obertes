@@ -461,20 +461,52 @@ uncertain, sub-200ms gain isn't a good trade. No further action from this
 thread — the camera-markers investigation is closed without a recommended
 fix, same conclusion as the bare-MapLibre+CARTO cost above.
 
-## To-do (priority order)
+### Unused-MapLibre-bundle investigation — 2026-09-03, later still
 
-1. **Investigate the 51%-unused MapLibre bundle** — the one remaining item,
-   lower confidence this has an easy fix, higher effort to investigate
-   (would need to check which MapLibre features `app.js` actually exercises
-   vs. what esbuild's tree-shaking is keeping). Every other avenue from this
-   audit (loading order, font/CSS blocking, network-chain depth, the CPU-cost
-   breakdown by feature) has been checked and either fixed or ruled out
-   without a further lever to pull.
-2. **No further action identified for bare MapLibre+CARTO's own rendering
-   cost** (the largest single share, ~67%) — inherent to MapLibre v6
-   rendering a real basemap at this throttle level, not something this
-   project's code controls further without either trimming CARTO's style
-   more aggressively than already done, or an upstream MapLibre improvement.
+Pulled the sourcemap-attributed byte ranges behind the 51%/134KiB
+"unused-javascript" finding (Lighthouse's `unused-javascript` audit,
+`subItems`, top 5 by wasted bytes):
+
+| Source | Unused / total | Feature |
+|---|---|---|
+| `@maplibre/mlt/dist/decoding/fastPforUnpack.js` | 3,926 / 3,926 (100%) | MLT — an alternate binary vector-tile format we never request (CARTO serves standard MVT) |
+| `geo/projection/vertical_perspective_transform.ts` | 3,451 / 3,456 (~100%) | Globe (3D sphere) projection — this site never switches out of flat Mercator |
+| `ui/map.ts` | 4,749 / 9,406 | The main `Map` class itself — partially used, rest is other unused code paths (terrain, etc.) |
+| `style/style.ts` | 3,935 / 7,442 | Style loading/diffing internals |
+| `data/bucket/symbol_bucket.ts` | 2,330 / 3,564 | Symbol placement — partially used (we do have label/count text) |
+
+These five account for only ~18KB of the 134KB total; the rest is spread
+across many smaller files Lighthouse doesn't list individually — but the
+pattern (whole features at ~100% unused) generalizes.
+
+**Root cause, confirmed by reading `node_modules/maplibre-gl/package.json`:**
+it declares `"sideEffects": ["*.css", "src/**/*.ts"]` — marking its *entire*
+source tree as side-effecting. That's the standard signal a bundler (esbuild
+included) uses to decide whether dropping an unused export is safe; marking
+the whole tree this broadly means esbuild can't safely tree-shake any of it
+out, regardless of what `app.js` actually calls. Its `exports` field also
+offers exactly one public entry point (`dist/maplibre-gl.mjs`, the full
+pre-bundled artifact) — no lighter/modular alternative to import instead.
+
+**Confirmed as a known, unresolved upstream limitation**, not something
+fixable from this project's side: [maplibre-gl-js issue
+#977](https://github.com/maplibre/maplibre-gl-js/issues/977) ("Tree
+shaking," open since Feb 2022) was closed without a real fix, labeled "PR
+more than welcomed" — i.e. still wanted, nobody's shipped it. No smaller
+official build, no globe/MLT opt-out flag, no workaround found. The only
+paths that could move this number are outside this project's own code:
+contributing a tree-shaking fix upstream, or (a bigger, separate
+architectural decision, not attempted here) dropping MapLibre for a
+different rendering library entirely.
+
+## To-do
+
+None remaining with a known fix. Every item from this audit has been either
+shipped and measured (font-display, static title/heading, `style.json`
+preload, deferred `maplibre-gl.css`) or investigated and closed without a
+viable lever to pull (TBT/CPU-cost breakdown, camera-markers cost, unused
+MapLibre bundle, bare MapLibre+CARTO's own rendering cost). Overall this
+audit: score 49 → 65, LCP 4.4s → 1.3s.
 
 ## How to re-run this audit
 
