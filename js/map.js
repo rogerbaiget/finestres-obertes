@@ -76,11 +76,25 @@ function computeInsertionPoints(layers){
 // showing until the next zoomend.
 let contourGeneration = 0;
 
+// Tracks whichever rings array is currently applied to the mask/outline sources —
+// pickContour() returns the SAME cached array/promise result for repeat calls within
+// one tier, so reference equality is enough to tell "zoom moved but stayed in the same
+// tier" apart from "zoom crossed into a new one". Without this check, updateContour()
+// called setData() with equivalent data on every single zoomend regardless — visibly
+// retessellating the mask (a single MultiPolygon covering everywhere outside the
+// Catalan Countries, up to ~19,000 points at the finer tiers) on every zoom, which
+// read as the whole map flashing/reloading each time a zoom gesture ended, confirmed
+// directly by reproducing a zoom-in-then-out with no tier change and no network
+// activity, yet the mask still visibly redrew.
+let currentContourRings = null;
+
 async function updateContour(){
   const zoom = map.getZoom();
   const gen = ++contourGeneration;
   const rings = await pickContour(zoom);
   if(gen !== contourGeneration) return;
+  if(rings === currentContourRings) return;
+  currentContourRings = rings;
   const geo = contourToGeoJSON(rings);
   if(map.getSource(maskSourceId)){
     map.getSource(maskSourceId).setData(geo.mask);
@@ -104,13 +118,38 @@ async function addContourLayers(ringsPromise = pickContour(map.getZoom())){
   const style0 = getComputedStyle(document.documentElement);
   const maskColor = style0.getPropertyValue('--mask').trim() || '#050d14';
   const maskOpacity = parseFloat(style0.getPropertyValue('--mask-opacity')) || 0.9;
-  const geo = contourToGeoJSON(await ringsPromise);
+  currentContourRings = await ringsPromise;
+  const geo = contourToGeoJSON(currentContourRings);
 
   const { maskBeforeId, beforeId } = computeInsertionPoints(map.getStyle().layers);
 
-  map.addSource(maskSourceId, {type:'geojson', data: geo.mask});
+  // maxzoom:4 caps MapLibre's OWN internal re-tiling of these GeoJSON sources
+  // (separate from, and in addition to, the zoom-tiered detail we already swap in via
+  // updateContour()'s setData calls): every reachable map zoom (minZoom is 5) then
+  // overzooms the same z4 tile(s) instead of crossing into freshly-generated ones —
+  // left at the default (18), crossing an integer zoom made MapLibre swap tiles, and
+  // for a moment before the new one was ready the previous one was just gone (the
+  // mask, a single polygon covering everywhere outside the Catalan Countries, visibly
+  // disappearing mid-zoom), confirmed via a fast zoom sequence with settle-waits
+  // removed. maxzoom alone wasn't enough, though: our region straddles longitude 0, so
+  // it always spans (at least) two horizontally-adjacent tiles at any zoom above 0 —
+  // panning during an aggressive zoom could still bring one of those into view for the
+  // first time, causing one more single-frame gap, confirmed with an automated check
+  // that queries a known-outside-contour point at every step of a fast zoom-in/out
+  // sequence and verifies the mask actually covers it whenever it's on-screen. A much
+  // larger buffer (default 128, out of 4096 units) closed that last gap by having each
+  // tile already render well past its own edge, into its neighbour's territory, so the
+  // neighbour isn't needed the instant it's approached. Going all the way to maxzoom:0
+  // (exactly one tile, globally, so there's no second tile to ever swap to at all) was
+  // tried first and also closed every gap, but visibly degraded the coastline to
+  // blocky straight segments — geojson-vt quantizes each tile's internal coordinates
+  // to a fixed 4096-unit grid regardless of how much detail the source geometry has,
+  // and at zoom 0 that grid covers the whole world (~10km per unit). maxzoom:4 with a
+  // larger buffer gets both properties at once, confirmed directly: zero gaps across
+  // the same aggressive sequence, and the coastline still crisp zoomed in tight.
+  map.addSource(maskSourceId, {type:'geojson', data: geo.mask, maxzoom: 4, buffer: 512});
   map.addLayer({id:'contour-mask-layer', type:'fill', source:maskSourceId, paint:{'fill-color':maskColor, 'fill-opacity':maskOpacity}}, maskBeforeId);
-  map.addSource(outlineSourceId, {type:'geojson', data: geo.outline});
+  map.addSource(outlineSourceId, {type:'geojson', data: geo.outline, maxzoom: 4, buffer: 512});
   map.addLayer({id:'contour-outline-layer', type:'line', source:outlineSourceId, paint:{'line-color':'#f2b705', 'line-width':1.4, 'line-opacity':0.6}}, beforeId);
 
   addAndorraCataloniaBorderLayer(beforeId);
