@@ -342,25 +342,50 @@ those would be shrinking or parallelizing `app.js`'s own download+parse+
 execute cost — which is exactly what to-do #3 (TBT root cause) below would
 also address, so there's no separate action item to add here.
 
+### Verified fix — 2026-09-03, later still: deferred maplibre-gl.css
+
+Deferred with the same `media="print" onload` pattern as the fonts.
+`styles.css` left blocking, untouched (small, and load-bearing for the
+2026-09-02 CLS fix). Verified first under throttled network+CPU (Playwright
++ CDP, 4x CPU/1.6Mbps/150ms latency, mobile viewport): sampled DOM state
+every 300ms–2s through a 14s window — at the first sample where MapLibre's
+controls exist in the DOM, they already have their real styled size, no
+frame with unstyled controls. Then re-ran the audit against production, 3×
+devtools-throttled, median:
+
+| Signal | Before this fix | After | Change |
+|---|---|---|---|
+| Performance score | 65 | 65 | flat |
+| LCP | 1.4s | **1.3s** | −0.1s |
+| FCP | 1.4s | **1.3s** | −0.1s |
+| CLS | 0.003 | 0.003 | flat — no regression |
+| Total Blocking Time | 1,670ms | 1,640ms | flat, still "poor" |
+| Speed Index | 8.8s | 8.7s | flat |
+| Interactive (TTI) | 11.6s | 11.6s | flat |
+
+Same pattern as the `style.json` preload: a real but small win
+(render-blocking-insight's ~721ms estimate didn't materialize at anywhere
+near that size), and TBT/Speed Index/TTI still untouched. Both remaining
+network/loading-side fixes from this audit are now shipped; what's left is
+squarely the `app.js` execution-cost side (to-do below).
+
 ## To-do (priority order)
 
-1. **Try deferring `maplibre-gl.css`** with the same async-CSS pattern as
-   the fonts; visually verify no control/popup flash before keeping it.
-   Leave `styles.css` blocking unless testing proves the CLS fix survives
-   deferring it too.
-2. **Re-run the CPU-profile TBT breakdown** (bare MapLibre+CARTO vs. our
+1. **Re-run the CPU-profile TBT breakdown** (bare MapLibre+CARTO vs. our
    layers vs. our markers, as done 2026-09-02) to confirm the ~52/20/28
    split still holds after CARTO-trimming and bundling, and check whether
    `yieldToMain()` chunking is actually keeping tasks under 50ms in
-   production (a 438ms task was observed this round). TBT hasn't moved
-   (1,670ms, still "poor") despite everything shipped so far — and per the
-   note above, this is now also the likely lever for Speed Index/TTI, not
-   just TBT: shrinking `app.js`'s own load-to-execute time would let
-   MapLibre react to the already-preloaded `style.json` sooner too.
-3. **Investigate the 51%-unused MapLibre bundle** only if 1–2 don't get TBT/
-   bundle-size where you want them — lower confidence this has an easy fix,
-   higher effort to investigate (would need to check which MapLibre features
-   `app.js` actually exercises vs. what esbuild's tree-shaking is keeping).
+   production (a 438ms task was observed earlier this round). TBT hasn't
+   moved (1,640ms, still "poor") through any fix shipped so far — and this
+   is now also the likely lever for Speed Index/TTI, not just TBT:
+   shrinking `app.js`'s own load-to-execute time would let MapLibre react
+   to the already-preloaded `style.json` sooner too. This is the one
+   remaining item with a plausible path to moving TBT/SI/TTI; the other
+   two below are lower-confidence.
+2. **Investigate the 51%-unused MapLibre bundle** — lower confidence this
+   has an easy fix, higher effort to investigate (would need to check which
+   MapLibre features `app.js` actually exercises vs. what esbuild's
+   tree-shaking is keeping).
 
 ## How to re-run this audit
 
