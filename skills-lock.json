@@ -31,11 +31,23 @@
       "skillPath": "skills/maplibre-cartography/SKILL.md",
       "computedHash": "9fc484e170614b80200d39d5f2029d1888c77e3ca084e412a40616e7d6d37e23"
     },
+    "maplibre-fonts-glyphs": {
+      "source": "maplibre/maplibre-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/maplibre-fonts-glyphs/SKILL.md",
+      "computedHash": "461c9d558292c9433890a3728541863a771ec7849052124278cf3e1144c54820"
+    },
     "maplibre-source-wiring": {
       "source": "maplibre/maplibre-agent-skills",
       "sourceType": "github",
       "skillPath": "skills/maplibre-source-wiring/SKILL.md",
       "computedHash": "1d6287fe0f6fd41a64d95eb488a44290bf41b588fe6f8faae85dc3f053f1d374"
+    },
+    "maplibre-tile-sources": {
+      "source": "maplibre/maplibre-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/maplibre-tile-sources/SKILL.md",
+      "computedHash": "f3bdeeccad44178664b3c2081989ee26f33a20b93aada8407fca1ea3945e02f4"
     },
     "performance": {
       "source": "addyosmani/web-quality-skills",
@@ -48,12 +60,6 @@
       "sourceType": "github",
       "skillPath": "skills/seo/SKILL.md",
       "computedHash": "01a735ac18ceb15536ac40b11a5712b3ab8f78ebe94748b3ebc3afc7f58a6f2f"
-    },
-    "web-design-guidelines": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "skillPath": "skills/web-design-guidelines/SKILL.md",
-      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
     },
     "web-quality-audit": {
       "source": "addyosmani/web-quality-skills",
