@@ -433,18 +433,44 @@ target, but no specific optimization was identified this round — would need
 its own profile drilling into what inside marker/cluster-layer setup is
 expensive (expression evaluation, symbol placement, clustering itself).
 
+### Camera-markers CPU cost, drilled into — 2026-09-03, later still
+
+Read `addClusteredLayer()` and `marker.js` first: both are minimal — a
+handful of `case`/`step`/`get` expressions over ~90 features, no
+zoom-dependent stops, no heavy filters. Nothing there reads as expensive at
+the JS level, so the ~253ms measured cost is more likely inside MapLibre's
+own machinery (clustering computation, the GeoJSON-source tile-worker
+pipeline) than in this project's paint definitions.
+
+Tested that directly: same CPU-profile methodology, 3 runs, `cluster: true`
+(current) vs. `cluster: false` (same 90 points, unclustered) on the source:
+
+| Variant | Runs (ms) | Median |
+|---|---|---|
+| Clustered (current) | 1171, 1049, 997 | 1,049ms |
+| Unclustered (`cluster: false`) | 1090, 875, 816 | 875ms |
+
+Suggests clustering computation itself accounts for roughly 174ms of the
+253ms marker cost — but that delta is smaller than the ~270ms run-to-run
+spread *within* the unclustered variant alone, so it's a weak, directional
+signal rather than a solid number. **Not recommending disabling clustering**
+even if the full 174ms is real: with 70 photo + 20 video cameras clustered
+down to a handful of circles at low zoom, clustering is a real, deliberate
+UX feature (keeps overlapping markers legible), and trading it away for an
+uncertain, sub-200ms gain isn't a good trade. No further action from this
+thread — the camera-markers investigation is closed without a recommended
+fix, same conclusion as the bare-MapLibre+CARTO cost above.
+
 ## To-do (priority order)
 
-1. **Investigate the camera-markers CPU cost specifically** (~253ms median,
-   ~24% of total CPU work in the post-load window) — the one remaining cost
-   center with a plausible, bounded further target. Would need drilling into
-   `addClusteredLayer()`/`marker.js`'s paint/layout expressions or clustering
-   config, not yet attempted.
-2. **Investigate the 51%-unused MapLibre bundle** — lower confidence this
-   has an easy fix, higher effort to investigate (would need to check which
-   MapLibre features `app.js` actually exercises vs. what esbuild's
-   tree-shaking is keeping).
-3. **No further action identified for bare MapLibre+CARTO's own rendering
+1. **Investigate the 51%-unused MapLibre bundle** — the one remaining item,
+   lower confidence this has an easy fix, higher effort to investigate
+   (would need to check which MapLibre features `app.js` actually exercises
+   vs. what esbuild's tree-shaking is keeping). Every other avenue from this
+   audit (loading order, font/CSS blocking, network-chain depth, the CPU-cost
+   breakdown by feature) has been checked and either fixed or ruled out
+   without a further lever to pull.
+2. **No further action identified for bare MapLibre+CARTO's own rendering
    cost** (the largest single share, ~67%) — inherent to MapLibre v6
    rendering a real basemap at this throttle level, not something this
    project's code controls further without either trimming CARTO's style
