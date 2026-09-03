@@ -39,4 +39,7 @@ jobs:
           # declaring a Node 16 runtime with no newer release fixing either —
           # wrangler-action is Cloudflare's actively maintained wrapper
           # around a current Wrangler, so it has neither problem.
-          command: pages deploy dist --project-name=finestres-obertes
+          # --commit-dirty=true: dist/ is gitignored build output, so Wrangler's
+          # own git-dirty check (unrelated to the Node-version issue above)
+          # always sees untracked files here and warns without it.
+          command: pages deploy dist --project-name=finestres-obertes --commit-dirty=true
