@@ -38,7 +38,10 @@
      flash of unstyled controls before keeping this; see PERFORMANCE.md. -->
 <link rel="stylesheet" href="maplibre-gl.css" media="print" onload="this.media='all'">
 <noscript><link rel="stylesheet" href="maplibre-gl.css"></noscript>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- EXPERIMENT: fonts.googleapis.com preconnect removed to test whether PageSpeed
+     Insights' "more than 4 preconnects" finding was double-counting this single tag
+     (once as head>link, once reformatted as an HTTP Link-header string) rather than
+     a real second hint. See PERFORMANCE.md before making this permanent either way. -->
 <!-- crossorigin is required here (unlike the fonts.googleapis.com preconnect above):
      loadCartoStyle() fetches style.json via fetch(), which uses CORS mode, opening a
      different kind of connection than a plain preconnect — without this attribute
