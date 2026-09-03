@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "dev": "python3 -m http.server 8420 --directory src",
+    "dev": "node build.mjs --watch",
     "serve:dist": "python3 -m http.server 8420 --directory dist"
   },
   "devDependencies": {
