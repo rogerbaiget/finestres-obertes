@@ -14,9 +14,22 @@ const LAYERS = [camerasLayer];
 
 let map, maskSourceId = 'contour-mask', outlineSourceId = 'contour-outline';
 
+// The mask's outer ring only needs to reach past whatever the map can ever actually
+// show — maxBounds (set from the post-fit viewport once 'load' fires) already locks
+// panning close to the contour itself (roughly 37.8-42.9°N, -1.5-8.4°E), regardless of
+// window size/aspect ratio. A generous margin around that, rather than the true
+// (-179,-89)-(179,89) world bounds used before, cuts the polygon's rasterized area by
+// roughly 15x with no visual difference (nothing outside maxBounds is ever reachable
+// to look different) — worth doing since a fill layer's GPU cost scales with the
+// screen area it covers, and this shape gets rasterized on every frame it's visible,
+// including under the sea (drawn over by 'water-sea' for correctness, but still
+// rasterized underneath first).
+const MASK_OUTER_BOUNDS = { minLng: -40, maxLng: 50, minLat: 15, maxLat: 65 };
+
 function contourToGeoJSON(rings){
-  // rings are [lat,lng]; GeoJSON needs [lng,lat]. First ring = world (outer), rest = holes.
-  const world = [[-179,-89],[179,-89],[179,89],[-179,89],[-179,-89]];
+  // rings are [lat,lng]; GeoJSON needs [lng,lat]. First ring = the outer bound above, rest = holes.
+  const { minLng, maxLng, minLat, maxLat } = MASK_OUTER_BOUNDS;
+  const world = [[minLng,minLat],[maxLng,minLat],[maxLng,maxLat],[minLng,maxLat],[minLng,minLat]];
   const holes = rings.map(ring => ring.map(([lat,lng])=>[lng,lat]));
   return {
     mask: {type:'Feature', geometry:{type:'Polygon', coordinates:[world, ...holes]}},
