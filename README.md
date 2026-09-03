@@ -53,20 +53,17 @@ src/
   index.html
   styles.css
   js/
-    app.js              — entry point: map setup, contours, region labels
-    site-config.js       — page title/heading, kept generic
-    carto-style.js        — basemap style trimming + shared label styling
-    theme.js               — light/dark theme handling
-    ui/player.js            — camera player UI controls
-    data/                    — static geo data (borders, contour levels)
-    layers/cameras/           — the cameras data layer (self-contained; see
-                                  below)
-build.mjs               — esbuild-based build/dev script
+    app.js          — entry point: map setup, contours, region labels
+    carto-style.js  — basemap style trimming + shared label styling
+    theme.js        — light/dark theme handling
+    ui/player.js    — camera player UI controls
+    data/           — static geo data (borders, contour levels)
+    layers/cameras/ — the cameras data layer (self-contained; see below)
+build.mjs           — esbuild-based build/dev script
 ```
 
 Each map data source is a self-contained "layer" living in its own
 `js/layers/<name>/` folder (see `js/layers/cameras/index.js` for the shape
 `app.js` expects). `app.js` only knows this generic interface — it has no
 cameras-specific knowledge — so a future layer (weather stations, points of
-interest, etc.) is added the same way, without touching `app.js` or
-`site-config.js`.
+interest, etc.) is added the same way, without touching `app.js`.

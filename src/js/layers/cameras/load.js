@@ -1,6 +1,7 @@
 // URL of the deployed cameras-api Worker — kept here, local to this layer, rather
-// than in the shared site-config.js: it's a cameras-layer implementation detail, not
-// something a differently-laid-out version of the site would still need. The Worker
+// than in app.js or any other shared file: it's a cameras-layer implementation
+// detail, not something a differently-laid-out version of the site would still
+// need. The Worker
 // (source: github.com/rogerbaiget/finestres-obertes-cameras-api) is the *only*
 // source of the camera list — this site holds no camera data at all — so if it's
 // unreachable, loadCameras() returns an empty list rather than falling back to

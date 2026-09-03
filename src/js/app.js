@@ -13,7 +13,6 @@ import { loadCartoStyle, REGION_LABEL_COLOR, REGION_LABEL_HALO, REGION_LABEL_LAY
 import { applyTheme } from './theme.js';
 import { wirePlayerControls } from './ui/player.js';
 import { camerasLayer } from './layers/cameras/index.js';
-import { SITE_CONFIG } from './site-config.js';
 
 // Data sources shown on the map. Each entry follows the layer shape documented in
 // js/layers/cameras/index.js — add a new layer by adding its module here.
@@ -502,11 +501,6 @@ async function loadAllLayers(){
   await Promise.all(LAYERS.map(layer => layer.load ? layer.load() : null));
 }
 
-function applySiteConfig(){
-  document.title = SITE_CONFIG.title;
-  document.getElementById('site-heading').textContent = SITE_CONFIG.heading;
-}
-
 function renderLegend(){
   const legendEl = document.getElementById('legend');
   LAYERS.forEach(layer=>{
@@ -524,7 +518,6 @@ function renderLegend(){
 }
 
 async function initMap(){
-  applySiteConfig();
   renderLegend();
   wirePlayerControls();
 
