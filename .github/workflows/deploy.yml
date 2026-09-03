@@ -17,9 +17,9 @@ jobs:
       contents: read
       deployments: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -28,11 +28,15 @@ jobs:
       - run: npm run build
 
       - name: Publish to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Must match the actual Cloudflare Pages project name exactly —
-          # confirm this in the Cloudflare dashboard before the first run.
-          projectName: finestres-obertes
-          directory: dist
+          # Project name must match the actual Cloudflare Pages project name
+          # exactly — confirm this in the Cloudflare dashboard before the
+          # first run. cloudflare/pages-action (previously used here) bundles
+          # an unsupported, deprecated Wrangler v2 internally and is stuck
+          # declaring a Node 16 runtime with no newer release fixing either —
+          # wrangler-action is Cloudflare's actively maintained wrapper
+          # around a current Wrangler, so it has neither problem.
+          command: pages deploy dist --project-name=finestres-obertes
