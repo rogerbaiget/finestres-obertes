@@ -21,6 +21,12 @@
      from growing after content and the web font swap land, which was the single
      largest contributor to this page's CLS score. */
   @media (max-width:1024px){ header{min-height:120px;} }
+  /* Below ~383px, .header-right's own content (legend + toggle) no longer fits
+     next to the title's wrapped 2 lines, so it wraps to a 3rd line (toggle
+     below the legend) — measured 153px settled height, taller than the 120px
+     above reserves. Same reasoning as that rule: book the taller height up
+     front so the toggle wrapping in doesn't shift #mapwrap down after load. */
+  @media (max-width:382px){ header{min-height:153px;} }
   /* Above ~1024px the row stays single-line, but the header still isn't a fixed
      height at first paint: title/legend/toggle are empty, and the fallback-font
      line-height differs slightly from Fraunces/Space Grotesk's own. Measured on a
@@ -31,7 +37,7 @@
   @media (min-width:1025px){ header{min-height:84px;} }
   .titlewrap{max-width:640px;}
   h1{font-family:'Fraunces',serif;font-weight:700;font-size:clamp(18px,3.5vw,25px);margin:0;color:var(--white);letter-spacing:-0.01em;}
-  .header-right{display:flex;align-items:center;gap:20px;flex-wrap:wrap;flex-shrink:0;}
+  .header-right{display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
   .legend{display:flex;gap:18px;font-size:14px;color:var(--text-secondary);flex-shrink:0;align-items:center;}
   .legend span{display:inline-flex;align-items:center;gap:7px;}
   .legend i{width:12px;height:12px;border-radius:50%;display:inline-block;border:2px solid #0a1f2e;}
