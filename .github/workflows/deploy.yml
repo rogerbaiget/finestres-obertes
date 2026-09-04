@@ -24,7 +24,21 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # npm ci was the dominant cost of every deploy (1.5-5 minutes out of a ~2.5
+      # minute run) despite setup-node's own npm-level cache above already hitting on
+      # every run — that cache only saves the registry download, not the work of
+      # resolving and extracting the tree to disk, and wrangler (added as a
+      # devDependency in 1522c46) pulls in workerd's platform binaries, making
+      # node_modules 287MB. Caching node_modules itself, keyed on package-lock.json,
+      # skips npm ci's disk work entirely on a hit — which is nearly every deploy,
+      # since the lockfile only changes when a dependency actually does.
+      - id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
       - run: npm run build
 
       - name: Publish to Cloudflare Pages
