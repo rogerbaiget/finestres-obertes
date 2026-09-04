@@ -537,8 +537,14 @@ async function initMap(){
   // whole 37.6-43.1°N range). Panning is unrestricted for the brief moment before
   // 'load' fires below, which is harmless — there's no realistic way to interact with
   // the map in that window.
+  // No minZoom here either: a fixed floor clamped the fit itself on narrow/short
+  // viewports (mobile portrait) where showing the whole region — this bbox spans
+  // roughly -1.5 to 8.4°E, since it stretches all the way to l'Alguer — needs to zoom
+  // out past 5, cutting off l'Alguer and skewing the visible center eastward.
+  // setMaxBounds below already stops the user zooming out past this fit afterward, so
+  // no separate floor is needed.
   map = new maplibregl.Map({
-    container:'map', style, bounds: computeContourBounds(), fitBoundsOptions:{padding:24}, minZoom:5,
+    container:'map', style, bounds: computeContourBounds(), fitBoundsOptions:{padding:24},
     attributionControl:false
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
