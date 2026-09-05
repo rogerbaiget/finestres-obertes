@@ -33,7 +33,7 @@ jobs:
       # skips npm ci's disk work entirely on a hit — which is nearly every deploy,
       # since the lockfile only changes when a dependency actually does.
       - id: node-modules-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
