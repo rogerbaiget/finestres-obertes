@@ -1,12 +1,12 @@
-// URL of the deployed cameras-api Worker — kept here, local to this layer, rather
+// URL of the deployed cameras-service Worker — kept here, local to this layer, rather
 // than in app.js or any other shared file: it's a cameras-layer implementation
 // detail, not something a differently-laid-out version of the site would still
 // need. The Worker
-// (source: github.com/rogerbaiget/finestres-obertes-cameras-api) is the *only*
+// (source: github.com/rogerbaiget/finestres-obertes-cameras-service) is the *only*
 // source of the camera list — this site holds no camera data at all — so if it's
 // unreachable, loadCameras() returns an empty list rather than falling back to
 // anything local.
-const CAMERA_STATUS_URL = 'https://finestres-obertes-cameras-api.roger-baiget.workers.dev';
+const CAMERA_STATUS_URL = 'https://finestres-obertes-cameras-service.roger-baiget.workers.dev';
 
 // --- Load cameras + their live availability ---
 // The Worker returns each cam already carrying a `broken` flag, checked server-side

@@ -7,4 +7,4 @@ Built with MapLibre GL JS over a trimmed CARTO basemap. The map itself ships no 
 ## Source
 
 - [Site repository](https://github.com/rogerbaiget/finestres-obertes)
-- [Camera data API repository](https://github.com/rogerbaiget/finestres-obertes-cameras-api)
+- [Camera data API repository](https://github.com/rogerbaiget/finestres-obertes-cameras-service)

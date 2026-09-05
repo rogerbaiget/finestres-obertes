@@ -8,7 +8,7 @@ native GPU layers rather than DOM elements.
 
 Camera data isn't part of this repo: the map fetches it at runtime from a
 separate Cloudflare Worker,
-[finestres-obertes-cameras-api](https://github.com/rogerbaiget/finestres-obertes-cameras-api),
+[finestres-obertes-cameras-service](https://github.com/rogerbaiget/finestres-obertes-cameras-service),
 which is the only source of truth for the camera list and their live/broken
 status.
 

@@ -50,7 +50,7 @@
 <!-- Both also fetched cross-origin (MapLibre's own tile/font/sprite loading, and
      load.js's fetch() to the Worker), so both need crossorigin for the same reason. -->
 <link rel="preconnect" href="https://tiles.basemaps.cartocdn.com" crossorigin>
-<link rel="preconnect" href="https://finestres-obertes-cameras-api.roger-baiget.workers.dev" crossorigin>
+<link rel="preconnect" href="https://finestres-obertes-cameras-service.roger-baiget.workers.dev" crossorigin>
 <!-- display=swap (not block): the H1 is our LCP element and uses Fraunces — block
      kept it invisible until the font arrived, and under real network contention
      with app.js/map tiles that font request doesn't even start for ~3s. swap
